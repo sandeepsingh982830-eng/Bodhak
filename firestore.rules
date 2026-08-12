@@ -1,0 +1,142 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isManager() {
+      return isSignedIn() && (
+        ('email' in request.auth.token && (
+          request.auth.token.email.matches('(?i)^sandeepsinghchouhan081@gmail\\.com$') ||
+          request.auth.token.email.matches('(?i)^bodhak355@gmail\\.com$')
+        )) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isManager', false) == true)
+      );
+    }
+
+    // --- Test Connection Doc ---
+    match /test/connection {
+      allow read: if true;
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    // --- App Ratings ---
+    match /appRatings/{ratingId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() && (request.auth.uid == ratingId || isManager());
+      allow delete: if isManager();
+    }
+
+    // --- Pinned Books & Free Materials ---
+    match /pinnedBooks/{bookId} {
+      allow read: if true;
+      allow write: if isSignedIn() || isManager();
+    }
+
+    match /pinnedFreeMaterials/{materialId} {
+      allow read: if true;
+      allow write: if isSignedIn() || isManager();
+    }
+
+    // --- Buy Materials ---
+    match /buyMaterials/{folderId} {
+      allow read: if true;
+      allow write: if isManager() || isSignedIn();
+      match /files/{fileId} {
+        allow read: if true;
+        allow write: if isManager() || isSignedIn();
+      }
+    }
+
+    // --- Free Materials ---
+    match /freeMaterials/{folderId} {
+      allow read: if true;
+      allow write: if isSignedIn() || isManager();
+      match /files/{fileId} {
+        allow read: if true;
+        allow write: if isSignedIn() || isManager();
+      }
+    }
+
+    // --- Payment Requests ---
+    match /paymentRequests/{requestId} {
+      allow read: if isManager() || (isSignedIn() && (resource == null || resource.data.userId == request.auth.uid));
+      allow create: if isSignedIn();
+      allow update: if isManager() || (isSignedIn() && resource != null && resource.data.userId == request.auth.uid);
+      allow delete: if isManager();
+    }
+
+    // --- Users Collection ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isManager());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (request.auth.uid == userId || isManager());
+      allow update: if isSignedIn() && (request.auth.uid == userId || isManager());
+      
+      // --- Coin History ---
+      match /coinHistory/{txId} {
+        allow read: if isSignedIn() && (request.auth.uid == userId || isManager());
+        allow create: if isSignedIn();
+        allow delete: if isManager();
+      }
+
+      // --- Saved Current Affairs ---
+      match /savedAffairs/{affairId} {
+        allow read, write: if isSignedIn() && (request.auth.uid == userId || isManager());
+      }
+
+      // --- Quizzes ---
+      match /quizzes/{quizId} {
+        allow read, write: if isSignedIn() && (request.auth.uid == userId || isManager());
+      }
+
+      // --- Notes ---
+      match /notes/{noteId} {
+        allow read, write: if isSignedIn() && (request.auth.uid == userId || isManager());
+      }
+
+      // --- Support Messages ---
+      match /messages/{messageId} {
+        allow read, write: if isSignedIn() && (request.auth.uid == userId || isManager());
+      }
+    }
+
+    // --- Global Notifications ---
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
+    // Support messages collection group for manager notifications
+    match /{path=**}/messages/{messageId} {
+      allow read: if isManager();
+    }
+  }
+}

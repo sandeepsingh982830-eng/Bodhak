@@ -1,0 +1,8 @@
+{
+  "name": " Bodhak",
+  "description": "An AI-powered quiz generator that creates custom quizzes on any subject, evaluates answers, and provides personalized feedback using Google Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

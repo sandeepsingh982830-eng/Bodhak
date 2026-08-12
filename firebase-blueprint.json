@@ -1,0 +1,164 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User's individual profile data including personal details and study goals.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Authenticated Firebase User UID" },
+        "name": { "type": "string", "description": "Full name of the user" },
+        "mobile": { "type": "string", "description": "Contact mobile number" },
+        "study": { "type": "string", "description": "Educational focus or goal" },
+        "email": { "type": "string", "format": "email" },
+        "isManager": { "type": "boolean", "description": "Flag indicating if the user has Manager access" },
+        "coins": { "type": "integer", "description": "User's current coin balance, defaults to 50 for normal users" },
+        "ipAddress": { "type": "string", "description": "User's last known IP address" },
+        "deviceFingerprint": { "type": "string", "description": "Browser/device fingerprint" },
+        "unlimitedExpirity": { "type": "integer", "description": "Timestamp in ms for unlimited pass" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId"]
+    },
+    "CurrentAffair": {
+      "title": "Saved Current Affair",
+      "description": "Individual news item or current affair fact saved by a user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string" },
+        "category": { "type": "string" },
+        "source": { "type": "string" },
+        "savedAt": { "type": "number", "description": "Timestamp in ms" }
+      },
+      "required": ["userId", "title", "date"]
+    },
+    "QuizHistoryItem": {
+      "title": "Quiz History Item",
+      "description": "Record of a quiz taken by the user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "config": { "type": "object" },
+        "questions": { "type": "array" },
+        "userAnswers": { "type": "array" },
+        "reviewStatus": { "type": "array" },
+        "visitedStatus": { "type": "array" },
+        "feedback": { "type": "string" },
+        "score": { "type": "number" },
+        "timeTaken": { "type": "number" },
+        "lastIndex": { "type": "number" },
+        "isFinished": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      }
+    },
+    "SavedNote": {
+      "title": "Saved Note",
+      "description": "Smart notes generated and saved by the user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "config": { "type": "object" },
+        "content": { "type": "string" },
+        "handwrittenImageUrl": { "type": "string" },
+        "createdAt": { "type": "number" }
+      }
+    },
+    "SupportMessage": {
+      "title": "Support Chat Message",
+      "description": "A message sent either by the user or the manager in the support chat.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "isAdminSender": { "type": "boolean" },
+        "imageUrl": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["text", "senderId", "createdAt"]
+    },
+    "GlobalSetting": {
+      "title": "Global Application Setting",
+      "description": "Global configuration parameters for the application.",
+      "type": "object",
+      "properties": {
+        "pricePerCoin": { "type": "number", "description": "Price of a single coin in INR" },
+        "minCoins": { "type": "number", "description": "Minimum coins package size" },
+        "unlimitedPassPrice": { "type": "number", "description": "Price for unlimited pass in INR" },
+        "unlimitedPassDays": { "type": "number", "description": "Duration of unlimited pass in days" },
+        "updatedAt": { "type": "number" }
+      }
+    },
+    "Notification": {
+      "title": "Global Notification",
+      "description": "A notification broadcasted by the manager to all users.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "number", "description": "Timestamp in ms" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" }
+      },
+      "required": ["title", "text", "createdAt"]
+    },
+    "PaymentRequest": {
+      "title": "Payment Request",
+      "description": "A payment verification request created by a user after paying via QR, requiring manager's approval.",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "amount": { "type": "number" },
+        "note": { "type": "string" },
+        "utr": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "coins": { "type": "integer" },
+        "isUnlimited": { "type": "boolean" },
+        "unlimitedDays": { "type": "integer" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["requestId", "userId", "amount", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "paymentRequests/{requestId}": {
+      "schema": "PaymentRequest",
+      "description": "Collection of manual payment recharge verification requests submitted by users with their transaction UTR."
+    },
+    "notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Collection of global notifications/alerts sent by manager."
+    },
+    "settings/{settingId}": {
+      "schema": "GlobalSetting",
+      "description": "Global settings for the application."
+    },
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user profiles keyed by their Firebase Auth UID."
+    },
+    "users/{userId}/savedAffairs/{affairId}": {
+      "schema": "CurrentAffair",
+      "description": "Collection of current affairs saved by the user."
+    },
+    "users/{userId}/quizzes/{quizId}": {
+      "schema": "QuizHistoryItem",
+      "description": "Collection of quizzes taken by the user."
+    },
+    "users/{userId}/notes/{noteId}": {
+      "schema": "SavedNote",
+      "description": "Collection of smart notes saved by the user."
+    },
+    "users/{userId}/messages/{messageId}": {
+      "schema": "SupportMessage",
+      "description": "Real-time support chat messages between the user and manager."
+    }
+  }
+}

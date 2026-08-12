@@ -1,0 +1,37 @@
+{
+  "name": "bodhak:-test",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "start": "node dist/server.cjs",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^1.32.0",
+    "@google/generative-ai": "^0.24.1",
+    "@types/dotenv": "^6.1.1",
+    "@types/express": "^5.0.6",
+    "docx": "^9.6.1",
+    "dotenv": "^17.4.2",
+    "esbuild": "^0.28.0",
+    "express": "^5.2.1",
+    "firebase": "^12.13.0",
+    "googleapis": "^173.0.0",
+    "html2pdf.js": "^0.14.0",
+    "lucide-react": "^0.556.0",
+    "motion": "^12.40.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-markdown": "^10.1.0",
+    "tsx": "^4.22.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
