@@ -15,39 +15,46 @@ import { QuizConfig, Question, QuestionType, NoteConfig, AnsChakFeedback } from 
 
 // Helper to call backend Gemini API
 const callGeminiAPI = async (action: string, payload: any) => {
-    const response = await fetch(`/api/gemini/${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
-    
-    const contentType = response.headers.get("content-type");
-    if (!response.ok) {
-        let errorMessage = `Failed to call Gemini API: ${action} (${response.status})`;
-        try {
-            if (contentType && contentType.includes("application/json")) {
-                const error = await response.json();
-                errorMessage = error.error || errorMessage;
-            } else {
-                const text = await response.text();
-                // If it's HTML, it's likely a server error page or 404
-                if (text.includes("<html>")) {
-                    errorMessage = `Server Error (${response.status}): The request could not be processed. This often happens with very large documents.`;
+    try {
+        const response = await fetch(`/api/gemini/${action}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        const contentType = response.headers.get("content-type");
+        if (!response.ok) {
+            let errorMessage = `Failed to process request (${response.status})`;
+            try {
+                if (contentType && contentType.includes("application/json")) {
+                    const error = await response.json();
+                    errorMessage = error.error || errorMessage;
                 } else {
-                    errorMessage = text || errorMessage;
+                    const text = await response.text();
+                    // If it's HTML, it's likely a server error page or 404
+                    if (text.includes("<html>")) {
+                        errorMessage = `Server Error (${response.status}): The request could not be processed. This often happens with very large documents.`;
+                    } else {
+                        errorMessage = text || errorMessage;
+                    }
                 }
+            } catch (e) {
+                console.error("Error parsing error response:", e);
             }
-        } catch (e) {
-            console.error("Error parsing error response:", e);
+            throw new Error(errorMessage);
         }
-        throw new Error(errorMessage);
-    }
-    
-    if (contentType && contentType.includes("application/json")) {
-        return await response.json();
-    } else {
-        const text = await response.text();
-        throw new Error(`Expected JSON response but received: ${text.substring(0, 100)}...`);
+        
+        if (contentType && contentType.includes("application/json")) {
+            return await response.json();
+        } else {
+            const text = await response.text();
+            throw new Error(`Expected JSON response but received: ${text.substring(0, 100)}...`);
+        }
+    } catch (err: any) {
+        if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
+            throw new Error("Unable to reach the server. Please check your connection and retry in a few seconds.");
+        }
+        throw err;
     }
 };
 
@@ -132,7 +139,7 @@ const generateImage = async (prompt: string): Promise<string | undefined> => {
     try {
         const stylePrompt = "Create a clear, black and white 2D line-art diagram on a solid white background. Educational textbook style. " + prompt;
         const response = await ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-3.7-flash',
             contents: { parts: [{ text: stylePrompt }] },
             config: {}
         });
@@ -151,7 +158,7 @@ const generateHandwrittenImage = async (topic: string): Promise<string | undefin
     try {
         const prompt = `Create a handwritten study note about "${topic}". Use a messy but legible student handwriting font on clean White paper. Use a yellow neon marker to highlight important terms so I can revise during exams and draw red circles around important dates. Add small doodles to explain the concepts better on A4 printable size paper.`;
         const response = await ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-3.7-flash',
             contents: { parts: [{ text: prompt }] },
             config: {}
         });
@@ -172,6 +179,10 @@ const generateHandwrittenImage = async (topic: string): Promise<string | undefin
 
 export const generateQuizQuestions = async (config: QuizConfig): Promise<Question[]> => {
   const { subject, topic, additionalTopics, splitTopics, numTopics, sourceMaterial, sourceMode, difficulty, language, type, count, includeImages, wordLimit, minQuestionWords, includeCurrentAffairs, includePYQ, pyqMaterial } = config;
+
+  const isExactSource = Boolean(sourceMaterial && sourceMode === 'exact');
+  const isSimilarSource = Boolean(sourceMaterial && sourceMode === 'similar');
+  const isRelatedSource = Boolean(sourceMaterial && sourceMode === 'related');
 
   let difficultyInstruction = "";
   
@@ -215,7 +226,29 @@ export const generateQuizQuestions = async (config: QuizConfig): Promise<Questio
        ${topicsList.map((t, i) => `- Generate exactly ${topicCounts[i]} questions for Topic ${i + 1}: "${t}".`).join('\n')}`
     : `Generate questions for the Topic: "${topic}".`;
 
-  if (type === 'subjective') {
+  if (isExactSource) {
+    difficultyInstruction = `
+    CRITICAL MANDATE: EXACT 1:1 SOURCE EXTRACTION ("Same Questions / हुबहू प्रश्न Mode"):
+    The user has provided SOURCE MATERIAL (PDF/Document) and explicitly chosen "Same Questions / हुबहू प्रश्न".
+    You MUST extract the questions, options, statements, and answers DIRECTLY from the provided SOURCE MATERIAL word-for-word, 100% VERBATIM (हूबहू).
+    
+    RULES FOR EXACT 1:1 REPRODUCTION:
+    1. ZERO MODIFICATION: Do NOT rephrase, simplify, shorten, rewrite, summarize, or artificially expand any question text, question numbers, premises, or options.
+    2. PRESERVE EXACT CHOICES: Extract all options (A, B, C, D / 1, 2, 3, 4) EXACTLY as they appear in the SOURCE MATERIAL without changing words or formatting.
+    3. PRESERVE ORIGINAL LANGUAGE: If questions are in Hindi, English, Punjabi, or bilingual in the PDF, keep their EXACT original language, vocabulary, and grammar. Do not translate them.
+    4. PRESERVE STRUCTURE: Statement questions (1, 2, 3), Assertion (A) & Reason (R), tables, or numbered lists MUST be extracted with their exact line breaks and text.
+    5. WORD LIMIT OFF: All minimum word count and answer length constraints are STRICTLY DISABLED for this mode so that text is identical to the PDF.
+    6. Extract up to ${count} questions found in the SOURCE MATERIAL in original sequential order.`;
+  } else if (isSimilarSource) {
+    difficultyInstruction = `
+    SOURCE MATERIAL (SIMILAR PATTERNS MODE):
+    Use the provided SOURCE MATERIAL as a structural blueprint and difficulty reference.
+    Generate ${count} NEW questions following the exact same style, pattern, and complexity as the questions in the source material.`;
+  } else if (isRelatedSource) {
+    difficultyInstruction = `
+    SOURCE MATERIAL (RELATED TOPICS MODE):
+    Use the concepts, syllabus points, and background context in the SOURCE MATERIAL to generate ${count} NEW analytical questions.`;
+  } else if (type === 'subjective') {
     difficultyInstruction = `
     ROLE: Academic Professor.
     TASK: ${topicInstruction}
@@ -255,28 +288,29 @@ export const generateQuizQuestions = async (config: QuizConfig): Promise<Questio
     }
   }
 
-  const questionLengthInstruction = minQuestionWords ? `
+  // Word length constraint is strictly turned OFF when isExactSource is true
+  const questionLengthInstruction = (!isExactSource && minQuestionWords) ? `
   MANDATORY: Each generated question must be detailed and descriptive. 
   - Every question text (the 'question' field) MUST be at least ${minQuestionWords} words long. 
   - Do NOT generate short one-line questions. Expand the context, provide background, or add premises to each question to meet this word count.` : "";
 
-  const currentAffairsInstruction = includeCurrentAffairs ? `
+  const currentAffairsInstruction = (includeCurrentAffairs && !isExactSource) ? `
   MANDATORY: At least 30% of the questions MUST be related to RECENT CURRENT AFFAIRS (last 1-2 years) specifically tied to the topic or subject. 
   If the topic is static, relate it to recent discoveries, news, or contemporary relevance.
   Set 'category' to 'Current Affairs' for these questions.` : "";
 
-  const pyqInstruction = (includePYQ && pyqMaterial) ? `
+  const pyqInstruction = (includePYQ && pyqMaterial && !isExactSource) ? `
   MANDATORY: At least 30% of the questions MUST be extracted from the provided PYQ MATERIAL.
   These questions should be exactly as they appear in the PYQ material but relevant to the topic.
   Set 'category' to 'PYQ' for these questions.` : "";
 
-  const ratioInstruction = (includeCurrentAffairs && includePYQ && pyqMaterial) ? `
+  const ratioInstruction = (includeCurrentAffairs && includePYQ && pyqMaterial && !isExactSource) ? `
   DISTRIBUTION RATIO (CRITICAL):
   - 30% of questions must be 'Current Affairs'.
   - 30% of questions must be 'PYQ' (from PYQ material).
   - 40% of questions must be 'Normal' (general academic knowledge).` : "";
 
-  const excludeInstruction = (config.excludeQuestions && config.excludeQuestions.length > 0) ? `
+  const excludeInstruction = (config.excludeQuestions && config.excludeQuestions.length > 0 && !isExactSource) ? `
   MANDATORY: DO NOT repeat any of the following questions that were previously generated:
   ${config.excludeQuestions.map(q => `- ${q}`).join('\n')}
   ` : "";
@@ -289,7 +323,20 @@ export const generateQuizQuestions = async (config: QuizConfig): Promise<Questio
   - DO NOT translate Language Skills questions; they must test the candidate in the original language intended by the PDF.
   - For other general knowledge questions in the PDF, you may follow the global setting of ${language} unless they are specifically bilingual in the source.` : "";
 
-  const systemInstruction = `You are an elite academic examiner for Civil Services Exams.
+  const systemInstruction = isExactSource 
+    ? `You are an exact OCR and document extraction engine for educational question papers.
+  TASK: Extract questions and multiple-choice options DIRECTLY and VERBATIM (हूबहू) from the provided SOURCE MATERIAL.
+  ${difficultyInstruction}
+  ${preserveLangInstruction}
+  
+  MANDATORY EXTRACTION SPECIFICATIONS:
+  1. Extract up to EXACTLY ${count} questions from the SOURCE MATERIAL in sequential order.
+  2. For each question, extract the question text and all options (A, B, C, D) 100% word-for-word exactly as printed.
+  3. Identify or extract the correct answer corresponding to the question.
+  4. DO NOT rephrase, rewrite, summarize, or alter any text.
+  5. DO NOT apply any word limit expansion or truncation rules.
+  6. Return the output as a valid JSON array matching the requested schema.`
+    : `You are an elite academic examiner for Civil Services Exams.
   Subject: ${subject}
   Language: ${language}
   Difficulty: ${difficulty}
@@ -314,7 +361,7 @@ export const generateQuizQuestions = async (config: QuizConfig): Promise<Questio
        कथन (A): ...
        
        कारण (R): ...
-  10. RANDOMIZATION PROTOCOL (CRITICAL):
+  11. RANDOMIZATION PROTOCOL (CRITICAL):
      - For objective questions, you MUST NOT always put the correct answer in the first position (Option A).
      - You must use a TRUE RANDOM distribution for the correct answer across indices 0, 1, 2, and 3 (A, B, C, D).
      - Across the set of ${count} questions, ensure that Option A, Option B, Option C, and Option D are all used as the correct answer roughly equally.
@@ -330,15 +377,15 @@ export const generateQuizQuestions = async (config: QuizConfig): Promise<Questio
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-3.7-flash",
       contents: contextSource,
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: getQuizSchema(count, type),
-        // High temperature ensures high entropy in answer positioning
-        temperature: 0.8,
-        tools: includeCurrentAffairs ? [{ googleSearch: {} }] : undefined
+        // Lower temperature for 1:1 verbatim extraction fidelity, higher for generative creativity
+        temperature: isExactSource ? 0.2 : 0.8,
+        tools: (includeCurrentAffairs && !isExactSource) ? [{ googleSearch: {} }] : undefined
       },
       category: includePYQ ? 'pyq' : 'quiz'
     });
@@ -425,7 +472,7 @@ export const verifyAndFixQuestion = async (question: Question, subject: string, 
     required: ["status"]
   };
   const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+    model: "gemini-3.7-flash",
     contents: `Subject: ${subject}, Question: ${JSON.stringify(question)}`,
     config: { systemInstruction, responseMimeType: "application/json", responseSchema },
     category: 'quiz'
@@ -499,7 +546,7 @@ Follow this exact output format:
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-3.7-flash",
       contents: contents,
       config: { 
         systemInstruction
@@ -515,32 +562,48 @@ Follow this exact output format:
 
 export const extractTextFromImage = async (base64Data: string, mimeType: string): Promise<string> => {
   const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+    model: "gemini-3.7-flash",
     contents: {
       parts: [
         { inlineData: { mimeType: mimeType, data: base64Data } },
-        { text: "OCR TASK: Extract all text precisely." }
+        { 
+          text: "STRICT OCR EXTRACTION: Extract and transcribe ONLY the exact handwritten or printed text present in the image verbatim. Output ONLY the raw extracted text content. DO NOT include any introductory comments, greetings, backticks, conversational filler, or phrases such as 'Based on the image provided', 'Here is the extracted text', 'Transcribed text:', or 'Here is what I found'." 
+        }
       ]
+    },
+    config: {
+      systemInstruction: "You are a pure OCR scanner. Output ONLY the exact text found inside the provided image. Never add introductory or conversational sentences like 'Based on the image...', 'Here is the extracted text:', etc."
     },
     category: 'other'
   });
-  return response.text || "";
+
+  let raw = response.text || "";
+  // Strip code fences if returned
+  raw = raw.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '').trim();
+  // Strip conversational introductory boilerplate
+  raw = raw.replace(/^(based on (the\s+)?(image|photo|document|handwritten text|picture)[^\n:]*[:\n\-–]+\s*)/i, '');
+  raw = raw.replace(/^(here is (the\s+)?(extracted|transcribed|text|transcription)[^\n:]*[:\n\-–]+\s*)/i, '');
+  raw = raw.replace(/^(the (image|text) (contains|reads|shows)[^\n:]*[:\n\-–]+\s*)/i, '');
+  raw = raw.replace(/^(extracted text[:\n\-–]+\s*)/i, '');
+  raw = raw.replace(/^(transcription[:\n\-–]+\s*)/i, '');
+
+  return raw.trim();
 };
 
 export const cleanTranscribedText = async (text: string): Promise<string> => {
-    const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: `Clean and fix punctuation for the following transcribed text:\n\n${text}`,
-        config: {
-            systemInstruction: "You are a transcription assistant. Fix grammar, spelling, and punctuation without changing the original meaning or intent of the text."
-        }
-    });
-    return response.text || text;
+    if (!text || text.trim().length === 0) return '';
+    let cleaned = text.trim();
+    cleaned = cleaned.replace(/^(based on (the\s+)?(image|photo|document|handwritten text|picture)[^\n:]*[:\n\-–]+\s*)/i, '');
+    cleaned = cleaned.replace(/^(here is (the\s+)?(extracted|transcribed|text|transcription)[^\n:]*[:\n\-–]+\s*)/i, '');
+    cleaned = cleaned.replace(/^(the (image|text) (contains|reads|shows)[^\n:]*[:\n\-–]+\s*)/i, '');
+    cleaned = cleaned.replace(/^(extracted text[:\n\-–]+\s*)/i, '');
+    cleaned = cleaned.replace(/^(transcription[:\n\-–]+\s*)/i, '');
+    return cleaned.trim();
 };
 
 export const suggestTopicTag = async (content: string): Promise<string> => {
     const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: "gemini-3.7-flash",
         contents: `Suggest a single, short topic tag (max 2 words) for the following content:\n\n${content}`,
         config: {
             systemInstruction: "You are a categorization assistant. Respond with ONLY the tag."
@@ -549,10 +612,32 @@ export const suggestTopicTag = async (content: string): Promise<string> => {
     return (response.text || "General").trim();
 };
 
+export const identifyTopicTags = async (topic: string, title?: string, description?: string): Promise<string[]> => {
+    try {
+        const text = [topic, title, description].filter(Boolean).join('. ').trim();
+        if (!text || text.length === 0) return [];
+        const response = await ai.models.generateContent({
+            model: "gemini-3.7-flash",
+            contents: `Analyze this study topic or context: "${text}".
+Identify the academic subject, syllabus areas, key conceptual terms, synonyms in Hindi and English, and topic tags.
+Return ONLY a comma-separated list of 10 to 15 relevant lowercase keyword tags.
+Do not include punctuation other than commas.`,
+            config: {
+                systemInstruction: "You are an expert academic taxonomy tag classifier. Return ONLY comma-separated keywords in English and Hindi transliteration."
+            }
+        });
+        const raw = (response.text || "").toLowerCase();
+        return raw.split(/[,;\n]+/).map(s => s.trim().replace(/^["']|["']$/g, '')).filter(s => s.length > 1);
+    } catch (e) {
+        console.error("Error identifying topic tags with AI:", e);
+        return [];
+    }
+};
+
 export const suggestBookTags = async (title: string, description?: string): Promise<string> => {
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+            model: "gemini-3.7-flash",
             contents: `Generate a list of AT LEAST 10 highly relevant subject, exam, and topic tags for a study material or book titled "${title}".
 Description: ${description || 'N/A'}
 
@@ -576,7 +661,7 @@ export const evaluateSubjectiveQuiz = async (questions: Question[], userAnswers:
     
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+            model: "gemini-3.7-flash",
             contents: content,
             config: {
                 responseMimeType: "application/json",
@@ -597,7 +682,7 @@ export const evaluateSubjectiveQuiz = async (questions: Question[], userAnswers:
 };
 
 export const generateNotes = async (config: NoteConfig): Promise<{ content: string; handwrittenImageUrl?: string }> => {
-    const { subject, topic, sourceText, language, format, includeCurrentAffairs, includeVocabulary, wordLimit, minWordLimit } = config;
+    const { subject, topic, sourceText, language, format, template = 'infographic', includeCurrentAffairs, includeVocabulary, wordLimit, minWordLimit } = config;
 
     let formatInstruction = "";
     let limitInstruction = `Target Word Limit: ${wordLimit} words. Minimum required: ${minWordLimit || 500} words. You MUST write at least the minimum word count. Expand on theoretical concepts, historical context, examples, and deep analysis to ensure the final output meets or exceeds this word count constraint.`;
@@ -615,8 +700,53 @@ export const generateNotes = async (config: NoteConfig): Promise<{ content: stri
             break;
     }
 
-    const currentAffairsInstruction = includeCurrentAffairs ? "Include recent developments or current affairs related to this topic from the last 1 to 2 years." : "";
-    const vocabularyInstruction = includeVocabulary ? "Include a 'Vocabulary List' section at the very end. Format it as a point-wise list (numbered or bulleted) containing at least 20 difficult or important words related to the topic and their definitions/meanings. Each word must be on a new line, like: '1. **Word** - Meaning'." : "";
+    let templateInstruction = "";
+    if (template === 'infographic') {
+        templateInstruction = `
+    CRITICAL: YOU MUST STRICTLY FORMAT THESE NOTES FOR THE 'A4 EDUCATIONAL INFOGRAPHIC' TEMPLATE ONLY.
+    Structure:
+    1. Start with '# ${subject}: ${topic}'.
+    2. The first main section MUST be '## 📌 Definition & Core Overview' containing a comprehensive rectangular overview of the topic.
+    3. Follow with 4 to 6 colorful thematic sub-heading sections (e.g., '## 🔶 [Subheading 1 Title]', '## 🔷 [Subheading 2 Title]', '## 🟣 [Subheading 3 Title]', '## 🟢 [Subheading 4 Title]', '## 🔴 [Subheading 5 Title]').
+    4. Under each sub-heading, write neat, high-yield bullet points ('- Point description with **bold keywords**'). Add a callout quote for key facts if helpful (e.g. '> 💡 Key Highlight: ...').
+    5. Conclude with '## 🎯 Quick Revision Takeaways'.`;
+    } else if (template === 'cornell') {
+        templateInstruction = `
+    CRITICAL: YOU MUST STRICTLY FORMAT THESE NOTES FOR THE 'CORNELL STUDY SHEET' TEMPLATE ONLY.
+    Structure:
+    1. Start with '# ${subject}: ${topic}'.
+    2. Primary Foundation: '## 📌 Core Topic Foundation' (Clear definition and baseline understanding).
+    3. 4 to 6 thematic cue sections (e.g., '## 📑 [Cue / Key Aspect Title]'). Under each section, write key cues and detailed analytical study points as bullet points ('- **Key Term / Cue**: Detailed explanatory note'). Include occasional highlight tips ('> 💡 Key Insight: ...').
+    4. Conclude with '## 📝 Summary & Key Takeaways' (A solid synthesis summary at the bottom).`;
+    } else if (template === 'cheatsheet') {
+        templateInstruction = `
+    CRITICAL: YOU MUST STRICTLY FORMAT THESE NOTES FOR THE 'EXAM CHEAT SHEET GRID' TEMPLATE ONLY.
+    Structure:
+    1. Start with '# ${subject}: ${topic}'.
+    2. '## 📌 Concept Summary' (High-impact, concise topic summary).
+    3. 4 to 8 high-density bite-sized cards (e.g., '## ⚡ [Key Rule / Article / Fact / Core Aspect]'). Under each card, provide concise, high-yield revision bullet points, formulas, memory shortcuts, and rapid facts.`;
+    } else if (template === 'editorial') {
+        templateInstruction = `
+    CRITICAL: YOU MUST STRICTLY FORMAT THESE NOTES FOR THE 'EDITORIAL EXECUTIVE BRIEF' TEMPLATE ONLY.
+    Structure:
+    1. Start with '# ${subject}: ${topic}'.
+    2. Executive Brief blockquote:
+       '> 🏛️ Executive Brief: [A formal, high-level strategic overview and thesis statement summarizing the core essence, background, and significance of the topic].'
+    3. '## 📌 Strategic Overview & Background' (Detailed contextual foundation).
+    4. 4 to 6 in-depth analytical sections (e.g., '## 1. [First Core Dimension]', '## 2. [Mechanisms & Policies]', '## 3. [Critical Analysis & Impacts]', etc.) with structured paragraphs and sharp bullet points.
+    5. Conclude with '## 🎯 Strategic Implications & Conclusion'.`;
+    } else if (template === 'classic') {
+        templateInstruction = `
+    CRITICAL: YOU MUST STRICTLY FORMAT THESE NOTES FOR THE 'CLASSIC DOCUMENT' TEMPLATE ONLY.
+    Structure:
+    1. Start with '# ${subject}: ${topic}'.
+    2. '## 1. Introduction & Theoretical Framework'
+    3. Sequential thematic sections with clear H2 and H3 headings ('## 2. [Core Theme]', '### 2.1 [Sub-dimension]', '## 3. [Key Concepts]', etc.) with rich academic paragraphs, structured lists, and clear explanations.
+    4. '## Conclusion & Summary'`;
+    }
+
+    const currentAffairsInstruction = includeCurrentAffairs ? "Include '## 📰 Recent Developments & Current Affairs' section with developments from the last 1 to 2 years." : "";
+    const vocabularyInstruction = includeVocabulary ? "Include a '## 📖 Vocabulary List' section at the very end. Format it as a point-wise list (numbered or bulleted) containing at least 15-20 difficult or important words related to the topic and their definitions/meanings. Each word must be on a new line, like: '1. **Word** - Meaning'." : "";
 
     const negativeConstraints = `
     STRICTLY PROHIBITED:
@@ -631,10 +761,12 @@ export const generateNotes = async (config: NoteConfig): Promise<{ content: stri
     INSTRUCTIONS:
     1. Organize the notes clearly with headings (H1, H2, H3), bold text for emphasis, and bullet lists where appropriate.
     2. Format: ${formatInstruction}
-    3. ${currentAffairsInstruction}
-    4. ${vocabularyInstruction}
-    5. ${negativeConstraints}
-    6. Return the notes formatted entirely in standard Markdown.`;
+    3. Template Structure:
+    ${templateInstruction}
+    4. ${currentAffairsInstruction}
+    5. ${vocabularyInstruction}
+    6. ${negativeConstraints}
+    7. Return the notes formatted entirely in standard Markdown.`;
 
     const contents = `
     Subject: ${subject}
@@ -646,7 +778,7 @@ export const generateNotes = async (config: NoteConfig): Promise<{ content: stri
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+            model: "gemini-3.7-flash",
             contents: contents,
             config: { 
                 systemInstruction
@@ -736,7 +868,7 @@ Answer in the same language as the provided answer.`;
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+            model: "gemini-3.7-flash",
             contents: answerText || "No answer provided.",
             config: {
                 systemInstruction,
@@ -848,7 +980,7 @@ Please format your response strictly as follows:
         parts.push({ text: prompt });
 
         const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+            model: "gemini-3.7-flash",
             contents: {
                 parts: parts
             },

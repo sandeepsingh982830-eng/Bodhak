@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -10,158 +11,129 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 export type CategoryType = 'quiz' | 'notes' | 'ans_chak' | 'ca' | 'pyq' | 'other';
 
-// Helper to assemble fallback Gemini API keys
-const getGeminiFallbackKeys = (): string[] => {
+// Helper to gather all valid Gemini API keys from environment
+const getActiveGeminiKeys = (): string[] => {
     const keys: string[] = [];
 
-    if (process.env.GEMINI_API_KEY) {
-        keys.push(process.env.GEMINI_API_KEY.trim());
-    }
-
-    if (process.env.API_KEY) {
-        process.env.API_KEY.split(",").forEach(key => {
-            const trimmed = key.trim();
-            if (trimmed && !keys.includes(trimmed)) {
-                keys.push(trimmed);
-            }
-        });
-    }
-
-    if (process.env.GEMINI_API_KEYS) {
-        process.env.GEMINI_API_KEYS.split(",").forEach(key => {
-            const trimmed = key.trim();
-            if (trimmed && !keys.includes(trimmed)) {
-                keys.push(trimmed);
-            }
-        });
-    }
-
-    const fallbackKeys = [
-        "AIzaSyBDdcDIzlDE9nFkvbGV4nFOymiUApeT6mQ",
-        "AIzaSyAPLK-rDOVoX39xs2Bo3UHmlQA5TulIfTQ",
-        "AIzaSyC5f2ga70B4Q-sQNt99T-eebgn2jcG55k8",
-        "AIzaSyDAMgy70sa1EvWZp-KHNbMa6HxUNuYB8a8",
-        "AIzaSyA11VH1W2IMmssfMLjp0yFl29BMkLNvGQY",
-        "AIzaSyA2795ICJF4PnZLEOzxD_rFEC1qWyR2XSM",
-        "AIzaSyDxMribymMxX0PuiJD9N1ixuodkpFNrkts",
-        "AIzaSyB9Z4609x7q7z6rt426-tzjy2ChCH2EEYc",
-        "AIzaSyA0NQpfptqEiOtnvj6o1NahEZ74TglYQIU",
-        "AIzaSyCZaHMbbDeMjAM5BbdDl_3SZNlTGd_HKrM",
-        "AIzaSyAJda9uTeacCTpcFsnplAoJF4Kw5EZEt6U",
-        "AIzaSyB4lLUrgwjztQdmYdEfbOfQram1zaUshOY",
-        "AIzaSyAVZL114akd_-6TG9KG6J6Fa8rAg8ZcnmY",
-        "AIzaSyAkMjTZO_JfGYBx3Kff2G-NCdEB6Oji3SQ",
-        "AIzaSyBlG7RVEQJHW5o6UvTxZ6WWefzMFYW2NZQ",
-        "AIzaSyAl-U9vm4T2PZVqMotZzGGmErgoiF-E7Og"
-    ];
-
-    fallbackKeys.forEach(key => {
-        if (!keys.includes(key)) {
-            keys.push(key);
+    const addKey = (k?: string) => {
+        if (!k) return;
+        const trimmed = k.trim();
+        if (trimmed && trimmed.startsWith('AIza') && !keys.includes(trimmed)) {
+            keys.push(trimmed);
+        } else if (trimmed && trimmed.length > 20 && !trimmed.startsWith('gsk_') && !trimmed.startsWith('cohere_') && !trimmed.startsWith('sk-') && !keys.includes(trimmed)) {
+            keys.push(trimmed);
         }
-    });
+    };
+
+    if (process.env.GEMINI_API_KEY) {
+        addKey(process.env.GEMINI_API_KEY);
+    }
+    if (process.env.API_KEY) {
+        process.env.API_KEY.split(",").forEach(addKey);
+    }
+    if (process.env.GEMINI_API_KEYS) {
+        process.env.GEMINI_API_KEYS.split(",").forEach(addKey);
+    }
 
     return keys;
 };
 
-const geminiFallbacks = getGeminiFallbackKeys();
+// Global pool of working Gemini keys
+let activeGeminiPool: string[] = getActiveGeminiKeys();
+let poolIndex = 0;
+const invalidKeys = new Set<string>();
 
-const isValidGeminiKey = (key: string): boolean => {
-    if (!key) return false;
-    const trimmed = key.trim();
-    return trimmed.startsWith('AIza') || (!!process.env.GEMINI_API_KEY && trimmed === process.env.GEMINI_API_KEY.trim());
-};
-
-const createSanitizedPool = (customKeys: string[] = []): string[] => {
-    const validCustom = customKeys.filter(isValidGeminiKey);
-    // Combine valid custom Gemini keys with fallback Gemini keys, eliminating duplicates
-    const combined = [...geminiFallbacks, ...validCustom];
-    return Array.from(new Set(combined.map(k => k.trim()))).filter(Boolean);
-};
-
-// Categorized API Key Pools strictly containing valid Gemini API keys
-const CATEGORY_KEY_POOLS: Record<CategoryType, string[]> = {
-    quiz: createSanitizedPool([
-        "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",
-        "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",
-        "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"
-    ]),
-    notes: createSanitizedPool([
-        "cohere_cGPSa21RyMvFTJbgdFf2uaOTwUcemJopzSfigk0f0VisgM",
-        "cohere_864dluApQV7Jws3DOewcu84gLj26rrrOtWEZltuJ3MzylW"
-    ]),
-    ans_chak: createSanitizedPool([
-        "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"
-    ]),
-    ca: createSanitizedPool([]),
-    pyq: createSanitizedPool([]),
-    other: createSanitizedPool([])
-};
-
-// Independent rotation indices for each category
-const CATEGORY_KEY_INDICES: Record<CategoryType, number> = {
-    quiz: 0,
-    notes: 0,
-    ans_chak: 0,
-    ca: 0,
-    pyq: 0,
-    other: 0
-};
-
-function getGeminiClientForCategory(category: CategoryType = 'other') {
-    const pool = CATEGORY_KEY_POOLS[category] || CATEGORY_KEY_POOLS['other'];
-    const idx = CATEGORY_KEY_INDICES[category] ?? 0;
-    const apiKey = pool[idx];
-
-    if (!apiKey) {
-        throw new Error(`No API key available for category: ${category}`);
+function getNextGeminiClient(): { ai: GoogleGenAI; key: string } {
+    // Refresh pool from env dynamically if needed
+    const currentEnvKeys = getActiveGeminiKeys();
+    for (const k of currentEnvKeys) {
+        if (!invalidKeys.has(k) && !activeGeminiPool.includes(k)) {
+            activeGeminiPool.push(k);
+        }
     }
 
-    console.log(`[Rotation Pool - Category: ${category}] Using Key Index: ${idx + 1}/${pool.length}`);
-    return new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-            headers: {
-                'User-Agent': 'aistudio-build',
-            }
+    // Filter out known invalid keys
+    const workingPool = activeGeminiPool.filter(k => !invalidKeys.has(k));
+    
+    if (workingPool.length === 0) {
+        // If all filtered out but env exists, try primary again
+        const primary = process.env.GEMINI_API_KEY?.trim();
+        if (primary) {
+            return {
+                ai: new GoogleGenAI({
+                    apiKey: primary,
+                    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+                }),
+                key: primary
+            };
         }
-    });
+        throw new Error("No valid Gemini API key configured in environment.");
+    }
+
+    poolIndex = poolIndex % workingPool.length;
+    const apiKey = workingPool[poolIndex];
+
+    return {
+        ai: new GoogleGenAI({
+            apiKey,
+            httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+        }),
+        key: apiKey
+    };
 }
 
 /**
- * Executes an AI request and automatically rotates keys for the specific category on quota/rate/auth errors.
- * Rotates continuously (key 1 -> key 2 ... -> key N -> key 1).
+ * Executes an AI request with intelligent key rotation, rate limit (429) backoff, and model failover.
  */
 async function callGeminiWithRotation<T>(
-    operation: (ai: GoogleGenAI) => Promise<T>,
-    category: CategoryType = 'other'
+    operation: (ai: GoogleGenAI, attemptModel?: string) => Promise<T>,
+    _category: CategoryType = 'other'
 ): Promise<T> {
-    const pool = CATEGORY_KEY_POOLS[category] || CATEGORY_KEY_POOLS['other'];
-    const totalKeys = pool.length;
-    if (totalKeys === 0) {
-        throw new Error(`Initialization Failed: No API Keys available for category ${category}.`);
-    }
-
+    const workingPool = activeGeminiPool.filter(k => !invalidKeys.has(k));
+    const totalKeys = Math.max(workingPool.length, 1);
+    const maxAttempts = Math.min(Math.max(totalKeys * 3, 4), 12);
     let attempts = 0;
-    const maxAttempts = Math.max(totalKeys * 3, 50);
+
+    // Fallback model list if the requested model hits rate limit or quota
+    const fallbackModels = [undefined, "gemini-3.7-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash"];
 
     while (attempts < maxAttempts) {
+        attempts++;
+        const { ai, key } = getNextGeminiClient();
+        const currentModel = attempts > 1 ? fallbackModels[attempts % fallbackModels.length] : undefined;
+
         try {
-            const ai = getGeminiClientForCategory(category);
-            return await operation(ai);
+            return await operation(ai, currentModel);
         } catch (error: any) {
-            attempts++;
-            const currentIndex = CATEGORY_KEY_INDICES[category] ?? 0;
-            const nextIndex = (currentIndex + 1) % totalKeys;
-            CATEGORY_KEY_INDICES[category] = nextIndex;
+            const errorMsg = (error?.message || '').toLowerCase();
+            const isInvalidKey = errorMsg.includes('api key not valid') || errorMsg.includes('api_key_invalid') || error?.status === 'INVALID_ARGUMENT';
+            const isQuotaOrRateLimit = errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('resource_exhausted') || errorMsg.includes('too many requests');
 
-            console.warn(`[Rotation - Category: ${category}] Key ${currentIndex + 1}/${totalKeys} failed (${error.message}). Rotating to Key ${nextIndex + 1}/${totalKeys} (Attempt ${attempts}/${maxAttempts})`);
+            if (isInvalidKey) {
+                console.warn(`[Gemini Auth] Pruning permanently invalid API key: ${key.substring(0, 8)}...`);
+                invalidKeys.add(key);
+                activeGeminiPool = activeGeminiPool.filter(k => k !== key);
+                // Try next key immediately without delay
+                continue;
+            }
 
-            await new Promise(resolve => setTimeout(resolve, 250));
-            continue;
+            if (isQuotaOrRateLimit) {
+                console.warn(`[Gemini Rate Limit 429] Key reached quota limit (Attempt ${attempts}/${maxAttempts}). Rotating key and trying fallback model...`);
+                poolIndex = (poolIndex + 1);
+                
+                // Exponential / stepped backoff before retrying
+                const delayMs = Math.min(800 * attempts, 3000);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+                continue;
+            }
+
+            // For other transient errors, rotate and brief delay
+            poolIndex = (poolIndex + 1);
+            await new Promise(resolve => setTimeout(resolve, 400));
         }
     }
-    throw new Error("Temporary System Overload: All backup AI systems are currently busy. Please retry in 30-60 seconds.");
+
+    throw new Error("AI service is currently busy handling high volume. Please wait a few moments and retry.");
 }
 
 app.use(express.json({ limit: '100mb' }));
@@ -238,8 +210,8 @@ app.get("/api/current-affairs", async (req, res) => {
            Focus on: National News, Economy, Science & Tech, Environment, and International Relations.
            Return as a JSON array of objects with keys: 'title', 'description', 'date', 'category', and 'source'.`;
 
-      const response = await callGeminiWithRotation((ai) => ai.models.generateContent({
-        model: "gemini-3.6-flash",
+      const response = await callGeminiWithRotation((ai, attemptModel) => ai.models.generateContent({
+        model: attemptModel || "gemini-3.7-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -282,64 +254,201 @@ app.get("/api/current-affairs", async (req, res) => {
   }
 });
 
-let theHinduCache: { en?: { data: any, lastUpdated: number }, hi?: { data: any, lastUpdated: number } } = {};
+interface TheHinduArticleBilingual {
+    category: string;
+    source: string;
+    date: string;
+    title_en: string;
+    title_hi: string;
+    description_en: string;
+    description_hi: string;
+    points_en: string[];
+    points_hi: string[];
+    syllabus_tags_en: string[];
+    syllabus_tags_hi: string[];
+}
+
+interface TheHinduDailyBundle {
+    dateKey: string;
+    dateFormatted: string;
+    generatedAt: number;
+    articles: TheHinduArticleBilingual[];
+}
+
+const THE_HINDU_CACHE_FILE = path.join(process.cwd(), 'the_hindu_daily.json');
+
+const getISTDateKey = (): string => {
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(now.getTime() + istOffset);
+    return istDate.toISOString().slice(0, 10); // YYYY-MM-DD
+};
+
+const getISTFormattedDate = (): string => {
+    return new Date().toLocaleDateString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+    });
+};
+
+const loadTheHinduCacheFromFile = (): TheHinduDailyBundle | null => {
+    try {
+        if (fs.existsSync(THE_HINDU_CACHE_FILE)) {
+            const raw = fs.readFileSync(THE_HINDU_CACHE_FILE, 'utf-8');
+            const data = JSON.parse(raw);
+            if (data && Array.isArray(data.articles) && data.articles.length > 0 && data.dateKey) {
+                return data as TheHinduDailyBundle;
+            }
+        }
+    } catch (e) {
+        console.warn("[The Hindu] Error reading persistent cache file:", e);
+    }
+    return null;
+};
+
+const saveTheHinduCacheToFile = (cache: TheHinduDailyBundle) => {
+    try {
+        fs.writeFileSync(THE_HINDU_CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');
+    } catch (e) {
+        console.warn("[The Hindu] Error writing persistent cache file:", e);
+    }
+};
+
+let theHinduDailyCache: TheHinduDailyBundle | null = loadTheHinduCacheFromFile();
+let theHinduFetchPromise: Promise<TheHinduDailyBundle> | null = null;
 
 app.get("/api/the-hindu", async (req, res) => {
-    const lang = (req.query.lang as string) || "en";
+    const lang = ((req.query.lang as string) || "en").toLowerCase();
+    const forceRefresh = req.query.refresh === "true";
+    const dateKey = getISTDateKey();
+    const formattedDate = getISTFormattedDate();
+
+    const formatOutput = (articles: TheHinduArticleBilingual[]) => {
+        return articles.map(item => ({
+            title: lang === 'hi' ? (item.title_hi || item.title_en) : (item.title_en || item.title_hi),
+            description: lang === 'hi' ? (item.description_hi || item.description_en) : (item.description_en || item.description_hi),
+            points: lang === 'hi' ? (item.points_hi && item.points_hi.length > 0 ? item.points_hi : item.points_en) : (item.points_en && item.points_en.length > 0 ? item.points_en : item.points_hi),
+            syllabus_tags: lang === 'hi' ? (item.syllabus_tags_hi && item.syllabus_tags_hi.length > 0 ? item.syllabus_tags_hi : item.syllabus_tags_en) : (item.syllabus_tags_en && item.syllabus_tags_en.length > 0 ? item.syllabus_tags_en : item.syllabus_tags_hi),
+            category: item.category,
+            source: item.source,
+            date: item.date || formattedDate
+        }));
+    };
+
     try {
-        const now = Date.now();
-        const istOffset = 5.5 * 60 * 60 * 1000;
-        const today5AM = new Date(new Date().getTime() + istOffset);
-        today5AM.setHours(5, 0, 0, 0);
-        const last5AMTimestamp = today5AM.getTime() - istOffset;
-
-        if (theHinduCache[lang as 'en' | 'hi'] && theHinduCache[lang as 'en' | 'hi']!.lastUpdated > last5AMTimestamp) {
-            return res.json(theHinduCache[lang as 'en' | 'hi']!.data);
-        }
-
-        const today = new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
-        const prompt = `Provide 10 in-depth analysis items and editorials from 'The Hindu' newspaper (as of ${today}) tailored for Indian competitive exams (UPSC / Civil Services) in ${lang === 'hi' ? 'Hindi' : 'English'}.
-Include key takeaways (points) and relevant syllabus tags (e.g. GS Paper 2 - Polity, GS Paper 3 - Economy).
-Return as a JSON array of objects with keys: 'title', 'description', 'date', 'category', 'source', 'points', and 'syllabus_tags'.`;
-
-        const response = await callGeminiWithRotation((ai) => ai.models.generateContent({
-            model: "gemini-3.6-flash",
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: "array",
-                    items: {
-                        type: "object",
-                        properties: {
-                            title: { type: "string" },
-                            description: { type: "string" },
-                            date: { type: "string" },
-                            category: { type: "string" },
-                            source: { type: "string" },
-                            points: { 
-                                type: "array",
-                                items: { type: "string" }
-                            },
-                            syllabus_tags: {
-                                type: "array",
-                                items: { type: "string" }
-                            }
-                        },
-                        required: ["title", "description", "date", "category", "source", "points", "syllabus_tags"]
-                    }
-                }
+        // 1. Check in-memory / file cache for today
+        if (!forceRefresh) {
+            if (!theHinduDailyCache) {
+                theHinduDailyCache = loadTheHinduCacheFromFile();
             }
-        }), 'ca');
-
-        const masterData = JSON.parse(response.text || "[]");
-        if (masterData.length > 0) {
-            theHinduCache[lang as 'en' | 'hi'] = { data: masterData, lastUpdated: now };
+            if (theHinduDailyCache && theHinduDailyCache.dateKey === dateKey && theHinduDailyCache.articles?.length > 0) {
+                return res.json(formatOutput(theHinduDailyCache.articles));
+            }
         }
-        res.json(masterData);
+
+        // 2. Prevent concurrent duplicate generations with a shared promise
+        if (!theHinduFetchPromise) {
+            theHinduFetchPromise = (async (): Promise<TheHinduDailyBundle> => {
+                const prompt = `You are a Senior UPSC Current Affairs Editor and Academic Examiner analyzing 'The Hindu' newspaper for Civil Services Exam (UPSC CSE, State PSCs, SSC CGL).
+Provide 10 in-depth analytical news articles and editorials from 'The Hindu' (as of ${formattedDate}).
+
+CRITICAL MANDATE: STRICT BILINGUAL 1:1 PAIRING (SAME 10 NEWS STORIES IN BOTH HINDI & ENGLISH)
+For EACH of the 10 articles, provide both English and Hindi versions representing the EXACT SAME underlying news facts, figures, constitutional context, and analysis:
+
+1. 'title_en': Formal, authoritative English headline from The Hindu.
+   'title_hi': Corresponding authentic Hindi headline (सटीक व प्रामाणिक हिंदी शीर्षक).
+2. 'description_en': Detailed, comprehensive analytical overview of MINIMUM 100 to 150 words covering background context, mechanisms, and multidimensional implications.
+   'description_hi': Exact matching in-depth Hindi analytical overview of MINIMUM 100 to 150 words covering the identical background, mechanisms, and implications in standard UPSC Hindi.
+3. 'points_en': 5 to 7 detailed, high-yield examination bullet points:
+   - Point 1: Core Fact, Policy, Bill, or Incident details
+   - Point 2: Background, Genesis, or Historical/Constitutional context
+   - Point 3: Key Arguments, Pros & Cons, or Sectoral Impacts
+   - Point 4: Government Initiatives, Schemes, Committees, or Supreme Court judgments
+   - Point 5+: Critical Analytical Takeaway, Future Way Forward, and Prelims/Mains Exam Relevance
+   (Use **bold terms** for key concepts, article numbers, and keywords).
+   'points_hi': Same 5 to 7 detailed examination bullet points translated into formal Hindi with matching bold terms and facts.
+4. 'syllabus_tags_en': 2 to 4 syllabus topics (e.g., 'GS Paper 2 - Polity & Governance', 'GS Paper 3 - Economy', 'GS Paper 3 - Environment', 'GS Paper 2 - International Relations').
+   'syllabus_tags_hi': Corresponding Hindi GS syllabus tags (e.g., 'GS पेपर 2 - राजव्यवस्था एवं शासन', 'GS पेपर 3 - अर्थव्यवस्था').
+5. 'category': 'National' | 'Economy' | 'Polity' | 'Science & Tech' | 'Environment' | 'International Relations' | 'Editorials'.
+6. 'source': 'The Hindu Editorial' or 'The Hindu National / Business'.
+7. 'date': '${formattedDate}'.
+
+Return strictly as a JSON array of 10 objects matching the schema.`;
+
+                const response = await callGeminiWithRotation((ai, attemptModel) => ai.models.generateContent({
+                    model: attemptModel || "gemini-3.7-flash",
+                    contents: prompt,
+                    config: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    title_en: { type: "string" },
+                                    title_hi: { type: "string" },
+                                    description_en: { type: "string" },
+                                    description_hi: { type: "string" },
+                                    date: { type: "string" },
+                                    category: { type: "string" },
+                                    source: { type: "string" },
+                                    points_en: { 
+                                        type: "array",
+                                        items: { type: "string" }
+                                    },
+                                    points_hi: { 
+                                        type: "array",
+                                        items: { type: "string" }
+                                    },
+                                    syllabus_tags_en: {
+                                        type: "array",
+                                        items: { type: "string" }
+                                    },
+                                    syllabus_tags_hi: {
+                                        type: "array",
+                                        items: { type: "string" }
+                                    }
+                                },
+                                required: [
+                                    "title_en", "title_hi", 
+                                    "description_en", "description_hi", 
+                                    "date", "category", "source", 
+                                    "points_en", "points_hi", 
+                                    "syllabus_tags_en", "syllabus_tags_hi"
+                                ]
+                            }
+                        }
+                    }
+                }), 'ca');
+
+                const parsed = JSON.parse(response.text || "[]");
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    const bundle: TheHinduDailyBundle = {
+                        dateKey,
+                        dateFormatted: formattedDate,
+                        generatedAt: Date.now(),
+                        articles: parsed
+                    };
+                    theHinduDailyCache = bundle;
+                    saveTheHinduCacheToFile(bundle);
+                    return bundle;
+                }
+                throw new Error("Failed to parse valid The Hindu daily articles");
+            })();
+        }
+
+        const bundle = await theHinduFetchPromise;
+        theHinduFetchPromise = null;
+        return res.json(formatOutput(bundle.articles));
     } catch (error: any) {
+        theHinduFetchPromise = null;
         console.error("The Hindu API Error:", error);
-        if (theHinduCache[lang as 'en' | 'hi']) return res.json(theHinduCache[lang as 'en' | 'hi']!.data);
+        // Fallback: If we have ANY existing cache, serve it
+        if (theHinduDailyCache && theHinduDailyCache.articles?.length > 0) {
+            return res.json(formatOutput(theHinduDailyCache.articles));
+        }
         res.status(500).json({ error: error.message || "Failed to fetch The Hindu news" });
     }
 });
@@ -353,8 +462,8 @@ app.post("/api/generate-quiz", async (req, res) => {
       : `Generate 5 multiple choice questions (MCQs) based on these current affairs. Each question must have 4 options and one correct answer.
         Data: ${JSON.stringify(affairs)}`;
 
-    const response = await callGeminiWithRotation((ai) => ai.models.generateContent({
-      model: "gemini-3.6-flash",
+    const response = await callGeminiWithRotation((ai, attemptModel) => ai.models.generateContent({
+      model: attemptModel || "gemini-3.7-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -394,7 +503,7 @@ app.post("/api/gemini/:action", async (req, res) => {
                 const { model, contents, config, category, task } = req.body;
                 
                 // Ensure we map any requested model to a valid Gemini model
-                let finalModel = "gemini-3.6-flash";
+                let finalModel = "gemini-3.7-flash";
                 if (model && (model.includes("3.") || model.includes("2.5") || model.includes("flash") || model.includes("pro"))) {
                     finalModel = model;
                 }
@@ -404,8 +513,8 @@ app.post("/api/gemini/:action", async (req, res) => {
                     ? (rawCategory as CategoryType)
                     : 'other';
 
-                const response = await callGeminiWithRotation((ai) => ai.models.generateContent({
-                    model: finalModel,
+                const response = await callGeminiWithRotation((ai, attemptModel) => ai.models.generateContent({
+                    model: attemptModel || finalModel,
                     contents,
                     config
                 }), validCategory);
@@ -428,7 +537,7 @@ app.post("/api/gemini/:action", async (req, res) => {
 
 function getProjectGeminiClient() {
     try {
-        return getGeminiClientForCategory('other');
+        return getNextGeminiClient().ai;
     } catch (e) {
         return null;
     }

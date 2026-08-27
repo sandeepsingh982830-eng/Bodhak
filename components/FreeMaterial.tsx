@@ -9,6 +9,8 @@ import html2pdf from 'html2pdf.js';
 import { db } from '../services/firebase';
 import { collection, addDoc, setDoc, doc, deleteDoc, query, orderBy, onSnapshot, getDocs, updateDoc } from 'firebase/firestore';
 import { Language } from '../translations';
+import { NoteTemplate } from '../types';
+import NoteTemplateRenderer, { TEMPLATE_OPTIONS } from './NoteTemplateRenderer';
 
 interface FreeMaterialProps {
     profile: any;
@@ -239,6 +241,7 @@ export const FreeMaterial: React.FC<FreeMaterialProps> = ({ profile }) => {
 
     // Custom In-App Modal States (Replaces window.open/confirm/alert)
     const [activePreviewFile, setActivePreviewFile] = useState<FileData | null>(null);
+    const [freeNoteTemplate, setFreeNoteTemplate] = useState<NoteTemplate>('infographic');
     const [confirmDialog, setConfirmDialog] = useState<{
         title: string;
         message: string;
@@ -1619,13 +1622,13 @@ export const FreeMaterial: React.FC<FreeMaterialProps> = ({ profile }) => {
 
                             return (
                                 <>
-                                    <div className="p-5 bg-slate-900 text-white flex justify-between items-center">
+                                    <div className="p-4 sm:p-5 bg-slate-900 text-white flex flex-wrap justify-between items-center gap-3">
                                         <div className="flex items-center gap-3">
                                             <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/30">
-                                                <BookOpen className="w-6 h-6" />
+                                                <BookOpen className="w-5 h-5" />
                                             </div>
                                             <div>
-                                                <h3 className="font-extrabold text-base md:text-lg leading-tight text-emerald-300">
+                                                <h3 className="font-extrabold text-sm sm:text-base leading-tight text-emerald-300">
                                                     {activeNoteFile.name}
                                                 </h3>
                                                 <p className="text-[11px] text-slate-300 font-medium">
@@ -1633,6 +1636,23 @@ export const FreeMaterial: React.FC<FreeMaterialProps> = ({ profile }) => {
                                                 </p>
                                             </div>
                                         </div>
+
+                                        {/* Template Switcher Pills in Modal */}
+                                        <div className="flex items-center bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto">
+                                            {TEMPLATE_OPTIONS.map(tmpl => (
+                                                <button
+                                                    key={tmpl.id}
+                                                    onClick={() => setFreeNoteTemplate(tmpl.id)}
+                                                    className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all flex items-center gap-1 ${
+                                                        freeNoteTemplate === tmpl.id ? 'bg-emerald-500 text-slate-950 font-extrabold shadow-xs' : 'text-slate-300 hover:text-white'
+                                                    }`}
+                                                >
+                                                    <span>{tmpl.icon}</span>
+                                                    <span className="hidden sm:inline">{tmpl.name.split(' ')[0]}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+
                                         <div className="flex items-center gap-2">
                                             <button
                                                 onClick={() => {
@@ -1678,24 +1698,18 @@ export const FreeMaterial: React.FC<FreeMaterialProps> = ({ profile }) => {
                                         </div>
                                     </div>
 
-                                    <div id="free-note-content-area" className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 bg-slate-50/50">
-                                        {handwrittenImg && (
-                                            <div className="mb-6 rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-white p-2">
-                                                <img 
-                                                    src={handwrittenImg} 
-                                                    alt="Handwritten Notes" 
-                                                    className="w-full h-auto rounded-xl object-contain"
-                                                    referrerPolicy="no-referrer"
-                                                />
-                                            </div>
-                                        )}
-
-                                        <div className="prose prose-slate max-w-none text-slate-800 text-sm md:text-base leading-relaxed bg-white p-6 md:p-8 rounded-3xl border border-slate-200 shadow-xs">
-                                            {noteContent ? (
-                                                <Markdown>{noteContent}</Markdown>
-                                            ) : (
-                                                <p className="text-slate-400 text-center py-6">कोई नोट्स कंटेंट उपलब्ध नहीं है। / No note content available.</p>
-                                            )}
+                                    <div id="free-note-content-area" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 bg-slate-100/70">
+                                        <div className="w-full max-w-4xl mx-auto">
+                                            <NoteTemplateRenderer 
+                                                note={{
+                                                    config: activeNoteFile.noteData?.config || { subject: noteSubject, topic: activeNoteFile.name, language: 'English', format: 'Detail' },
+                                                    content: noteContent,
+                                                    handwrittenImageUrl: handwrittenImg,
+                                                    createdAt: activeNoteFile.createdAt
+                                                }}
+                                                activeTemplate={freeNoteTemplate}
+                                                onSelectTemplate={(t) => setFreeNoteTemplate(t)}
+                                            />
                                         </div>
                                     </div>
 

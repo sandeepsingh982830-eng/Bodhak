@@ -211,12 +211,13 @@ const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ config, setConfig, onGe
     );
 
     const sourceModes: { id: SourceMode; label: string; desc: string }[] = [
-        { id: 'exact', label: 'Same Questions / हुबहू प्रश्न', desc: '1:1 Identical copy of text, options & words / पीडीएफ से बिल्कुल हुबहू प्रश्न और विकल्प' },
+        { id: 'exact', label: 'Same Questions / हुबहू प्रश्न', desc: '1:1 Identical copy of text, options & words (Word limit OFF) / पीडीएफ से बिल्कुल हुबहू प्रश्न और विकल्प (शब्द सीमा स्वतः बंद)' },
         { id: 'similar', label: 'Similar Patterns / समान पैटर्न', desc: 'New questions using similar logic and style / उसी तरह के नए प्रश्न बनाएं' },
         { id: 'related', label: 'New Topics / संबंधित विषय', desc: 'New questions based on source context / पीडीएफ के संदर्भ पर आधारित नए प्रश्न' },
     ];
 
     const isSubjective = config.type === 'subjective';
+    const isExactModeActive = Boolean(config.sourceMaterial && config.sourceMode === 'exact');
 
     return (
         <div className="p-4 space-y-4 w-full max-w-5xl mx-auto animate-in fade-in duration-500 text-slate-800">
@@ -564,45 +565,77 @@ const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ config, setConfig, onGe
                                 </button>
 
                                  {/* Minimum Question Word Count - Unified Feature */}
-                                <div className={`flex items-center border rounded-xl overflow-hidden h-[26px] md:h-[34px] transition-all bg-slate-50/50 border-slate-200 shadow-sm shadow-indigo-500/5`}>
+                                <div 
+                                    className={`flex items-center border rounded-xl overflow-hidden h-[26px] md:h-[34px] transition-all ${
+                                        isExactModeActive 
+                                            ? 'bg-slate-100/80 border-slate-300 opacity-60' 
+                                            : 'bg-slate-50/50 border-slate-200 shadow-sm shadow-indigo-500/5'
+                                    }`}
+                                    title={isExactModeActive ? "Word Limit is turned OFF in Same Questions (1:1 Exact) mode to ensure 100% verbatim PDF text / हुबहू प्रश्न के लिए शब्द सीमा स्वतः बंद है" : "Minimum words for the question content / प्रति प्रश्न न्यूनतम शब्द"}
+                                >
                                     <div 
-                                        className={`h-full px-2 text-[10px] md:text-xs uppercase font-black flex items-center border-r transition-all gap-1.5 bg-indigo-600 text-white border-indigo-400/20`}
-                                        title="Minimum words for the question content / प्रति प्रश्न न्यूनतम शब्द"
+                                        className={`h-full px-2 text-[10px] md:text-xs uppercase font-black flex items-center border-r transition-all gap-1.5 ${
+                                            isExactModeActive 
+                                                ? 'bg-slate-400 text-white border-slate-300' 
+                                                : 'bg-indigo-600 text-white border-indigo-400/20'
+                                        }`}
                                     >
                                         <FileText className="w-3 h-3 md:w-3.5 md:h-3.5" />
-                                        <span className="hidden xs:inline">m. Word</span>
+                                        <span className="hidden xs:inline">{isExactModeActive ? 'Word Limit' : 'm. Word'}</span>
                                     </div>
                                     <div className="flex items-center bg-transparent group focus-within:ring-1 focus-within:ring-indigo-500 px-1.5">
-                                        <input 
-                                            type="number"
-                                            min="5"
-                                            max="500"
-                                            value={config.minQuestionWords !== undefined ? config.minQuestionWords : 30}
-                                            onChange={(e) => handleChange('minQuestionWords', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
-                                            className="bg-transparent text-slate-800 font-black text-[11px] md:text-sm w-[35px] md:w-[45px] text-center outline-none"
-                                        />
+                                        {isExactModeActive ? (
+                                            <span className="text-slate-500 font-bold text-[10px] md:text-xs px-1.5 tracking-wide cursor-not-allowed">
+                                                OFF (Exact)
+                                            </span>
+                                        ) : (
+                                            <input 
+                                                type="number"
+                                                min="5"
+                                                max="500"
+                                                value={config.minQuestionWords !== undefined ? config.minQuestionWords : 30}
+                                                onChange={(e) => handleChange('minQuestionWords', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
+                                                className="bg-transparent text-slate-800 font-black text-[11px] md:text-sm w-[35px] md:w-[45px] text-center outline-none"
+                                            />
+                                        )}
                                     </div>
                                 </div>
 
                                 {/* Subjective Answer Word Limit - Specific to Subjective */}
-                                <div className={`flex items-center border rounded-xl overflow-hidden h-[26px] md:h-[34px] transition-all bg-slate-50/50 ${isSubjective ? 'border-emerald-500 shadow-md shadow-emerald-500/5' : 'border-slate-200 opacity-40 cursor-not-allowed'}`}>
+                                <div 
+                                    className={`flex items-center border rounded-xl overflow-hidden h-[26px] md:h-[34px] transition-all ${
+                                        isSubjective && !isExactModeActive 
+                                            ? 'bg-slate-50/50 border-emerald-500 shadow-md shadow-emerald-500/5' 
+                                            : 'bg-slate-100/80 border-slate-200 opacity-40 cursor-not-allowed'
+                                    }`}
+                                    title={isExactModeActive ? "Word limit disabled for exact PDF extraction" : "Subjective answer target word limit / सब्जेक्टिव उत्तर शब्द सीमा"}
+                                >
                                     <div 
-                                        className={`h-full px-2 text-[10px] md:text-xs uppercase font-black flex items-center border-r transition-all gap-1.5 ${isSubjective ? 'bg-emerald-600 text-white border-emerald-400/20' : 'bg-slate-100 text-slate-400 border-slate-200'}`}
-                                        title="Subjective answer target word limit / सब्जेक्टिव उत्तर शब्द सीमा"
+                                        className={`h-full px-2 text-[10px] md:text-xs uppercase font-black flex items-center border-r transition-all gap-1.5 ${
+                                            isSubjective && !isExactModeActive 
+                                                ? 'bg-emerald-600 text-white border-emerald-400/20' 
+                                                : 'bg-slate-100 text-slate-400 border-slate-200'
+                                        }`}
                                     >
                                         <TypeIcon className="w-3 h-3 md:w-3.5 md:h-3.5" />
                                         <span className="hidden xs:inline">Subj. Limit</span>
                                     </div>
                                     <div className="flex items-center bg-transparent group focus-within:ring-1 focus-within:ring-emerald-500 px-1.5">
-                                        <input 
-                                            type="number"
-                                            min="20"
-                                            max="2000"
-                                            disabled={!isSubjective}
-                                            value={config.wordLimit || 150}
-                                            onChange={(e) => handleChange('wordLimit', parseInt(e.target.value) || 150)}
-                                            className="bg-transparent text-slate-800 font-black text-[11px] md:text-sm w-[40px] md:w-[55px] text-center outline-none disabled:cursor-not-allowed"
-                                        />
+                                        {isExactModeActive ? (
+                                            <span className="text-slate-400 font-bold text-[10px] md:text-xs px-1.5">
+                                                OFF
+                                            </span>
+                                        ) : (
+                                            <input 
+                                                type="number"
+                                                min="20"
+                                                max="2000"
+                                                disabled={!isSubjective}
+                                                value={config.wordLimit || 150}
+                                                onChange={(e) => handleChange('wordLimit', parseInt(e.target.value) || 150)}
+                                                className="bg-transparent text-slate-800 font-black text-[11px] md:text-sm w-[40px] md:w-[55px] text-center outline-none disabled:cursor-not-allowed"
+                                            />
+                                        )}
                                     </div>
                                 </div>
 
@@ -656,6 +689,14 @@ const QuizConfigForm: React.FC<QuizConfigFormProps> = ({ config, setConfig, onGe
                                         <X className="h-3 w-3 mr-1" /> Remove File
                                     </button>
                                 </div>
+                                
+                                {config.sourceMode === 'exact' && (
+                                    <div className="px-3 py-2 bg-amber-50 border border-amber-200/80 rounded-xl text-amber-900 text-xs flex items-center gap-2">
+                                        <Zap className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+                                        <span><strong>100% Verbatim Mode (हूबहू):</strong> Questions, options & answers will be extracted exactly as in the PDF. Word limits and length expansions are deactivated.</span>
+                                    </div>
+                                )}
+
                                 <div className="grid grid-cols-1 gap-2">
                                     {sourceModes.map((m) => (
                                         <button

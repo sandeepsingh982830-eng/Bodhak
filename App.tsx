@@ -209,9 +209,10 @@ const App: React.FC = () => {
                 return;
             }
 
-            // Prepare exclusion list if we have existing questions on the same topic
+            // Prepare exclusion list if we have existing questions on the same topic (bypass in exact source mode)
+            const isExactPdfMode = Boolean(config.sourceMaterial && config.sourceMode === 'exact');
             const existingTopic = config.topic;
-            const previousForTopic = sessionExclusions.current[existingTopic] || [];
+            const previousForTopic = isExactPdfMode ? [] : (sessionExclusions.current[existingTopic] || []);
             
             const configWithExclusions: QuizConfig = {
                 ...config,
@@ -221,8 +222,10 @@ const App: React.FC = () => {
             const generatedQuestions = await generateQuizQuestions(configWithExclusions);
 
             // Update session exclusions
-            const newQuestions = generatedQuestions.map(q => q.question);
-            sessionExclusions.current[existingTopic] = [...previousForTopic, ...newQuestions];
+            if (!isExactPdfMode) {
+                const newQuestions = generatedQuestions.map(q => q.question);
+                sessionExclusions.current[existingTopic] = [...previousForTopic, ...newQuestions];
+            }
 
             setQuestions(generatedQuestions);
             setUserAnswers(new Array(generatedQuestions.length).fill(null));

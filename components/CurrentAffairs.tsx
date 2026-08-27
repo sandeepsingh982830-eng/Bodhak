@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Calendar, Bookmark, BookmarkCheck, Search, Share2, Loader2, Newspaper, ArrowUpRight, Clock, Tag, Brain, ChevronRight, CheckCircle2, XCircle, RotateCcw, Copy } from 'lucide-react';
+import { 
+    Sparkles, Calendar, Bookmark, BookmarkCheck, Search, Share2, Loader2, 
+    Newspaper, ArrowUpRight, Clock, Tag, Brain, ChevronRight, CheckCircle2, 
+    XCircle, RotateCcw, Copy, Send, MessageCircle, Check, ChevronDown, ChevronUp, ExternalLink 
+} from 'lucide-react';
 import { fetchDailyAffairs, fetchSavedAffairs, saveAffair, deleteSavedAffair, CurrentAffair, generateQuiz, QuizQuestion, fetchTheHinduNews } from '../services/currentAffairsService';
 import { useAuth } from '../hooks/useAuth';
 import { motion, AnimatePresence } from 'motion/react';
@@ -43,7 +47,9 @@ const CurrentAffairs: React.FC<CurrentAffairsProps> = ({ initialViewMode }) => {
     const [theHinduArticles, setTheHinduArticles] = useState<CurrentAffair[]>([]);
     const [theHinduLoading, setTheHinduLoading] = useState(false);
     const [expandedHinduIndex, setExpandedHinduIndex] = useState<number | null>(null);
+    const [expandAllHindu, setExpandAllHindu] = useState<boolean>(true);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const [shareToast, setShareToast] = useState<string | null>(null);
 
     useEffect(() => {
         if (user) {
@@ -67,7 +73,7 @@ const CurrentAffairs: React.FC<CurrentAffairsProps> = ({ initialViewMode }) => {
     const loadTheHinduNews = async (lang: 'en' | 'hi' = language) => {
         setTheHinduLoading(true);
         setError(null);
-        setExpandedHinduIndex(null); // Reset expanded details on load
+        setExpandedHinduIndex(null);
         try {
             const data = await fetchTheHinduNews(lang);
             setTheHinduArticles(data);
@@ -79,89 +85,140 @@ const CurrentAffairs: React.FC<CurrentAffairsProps> = ({ initialViewMode }) => {
         }
     };
 
+    const isItemSaved = (title: string) => savedAffairs.some(a => a.title === title);
+
     const toggleSave = async (item: CurrentAffair) => {
         if (!user) {
             alert("Please sign in to save current affairs.");
             return;
         }
-
-        const isAlreadySaved = savedAffairs.some(a => a.title === item.title);
+        const isSaved = isItemSaved(item.title);
         try {
-            if (isAlreadySaved) {
-                const savedItem = savedAffairs.find(a => a.title === item.title);
-                if (savedItem?.id) {
-                    await deleteSavedAffair(user.uid, savedItem.id);
+            if (isSaved) {
+                const target = savedAffairs.find(a => a.title === item.title);
+                if (target?.id) {
+                    await deleteSavedAffair(user.uid, target.id);
                 }
             } else {
                 await saveAffair(user.uid, item);
             }
             await loadSaved();
         } catch (err) {
+            console.error("Error toggling save:", err);
             alert("Failed to update saved affairs.");
+        }
+    };
+
+    const formatAllHinduDigestText = () => {
+        const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+        let text = `📰 *THE HINDU - UPSC DAILY CURRENT AFFAIRS DIGEST*\n📅 *${today}* | Bodhak AI\n` +
+                   `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+        theHinduArticles.forEach((item, idx) => {
+            text += `🔹 *${idx + 1}. ${item.title}*\n`;
+            text += `🏷️ *Category:* ${item.category} | 🏛️ *Source:* ${item.source || 'The Hindu'}\n`;
+            if (item.syllabus_tags && item.syllabus_tags.length > 0) {
+                text += `📚 *Syllabus:* ${item.syllabus_tags.join(', ')}\n`;
+            }
+            text += `\n📝 *Comprehensive Context & Analysis / विस्तृत विश्लेषण:*\n${item.description}\n\n`;
+            if (item.points && item.points.length > 0) {
+                text += `📌 *Key Examination Points / मुख्य बिंदु:*\n`;
+                item.points.forEach((pt, pIdx) => {
+                    text += `  ${pIdx + 1}. ${pt.replace(/\*\*/g, '')}\n`;
+                });
+                text += `\n`;
+            }
+            text += `──────────────────────────\n\n`;
+        });
+
+        text += `📲 Prepared with Bodhak Smart Notes & AI Test Prep\n`;
+        return text;
+    };
+
+    const handleShareAllHindu = async (target: 'whatsapp' | 'telegram' | 'native' | 'copy') => {
+        if (theHinduArticles.length === 0) return;
+        const text = formatAllHinduDigestText();
+        const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+        if (target === 'whatsapp') {
+            const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+            window.open(url, '_blank', 'noopener,noreferrer');
+        } else if (target === 'telegram') {
+            const url = `https://t.me/share/url?url=${encodeURIComponent(window.location.origin)}&text=${encodeURIComponent(text)}`;
+            window.open(url, '_blank', 'noopener,noreferrer');
+        } else if (target === 'native') {
+            if (navigator.share) {
+                try {
+                    await navigator.share({
+                        title: `The Hindu Daily Current Affairs (${today})`,
+                        text: text
+                    });
+                } catch (err) {
+                    console.log('Native share closed/canceled', err);
+                }
+            } else {
+                await navigator.clipboard.writeText(text);
+                setShareToast(language === 'hi' ? 'द हिन्दू के सभी 10 समाचार कॉपी हो गए हैं!' : 'All 10 news items copied to clipboard!');
+                setTimeout(() => setShareToast(null), 3000);
+            }
+        } else if (target === 'copy') {
+            await navigator.clipboard.writeText(text);
+            setShareToast(language === 'hi' ? 'द हिन्दू के सभी 10 समाचार क्लिपबोर्ड पर कॉपी हो गए हैं!' : 'All 10 news items copied to clipboard!');
+            setTimeout(() => setShareToast(null), 3000);
+        }
+    };
+
+    const handleShareSingleItem = (item: CurrentAffair, target: 'whatsapp' | 'telegram') => {
+        let text = `📰 *THE HINDU: ${item.title}*\n`;
+        text += `🏷️ ${item.category} | ${item.source || 'The Hindu'}\n\n`;
+        if (item.syllabus_tags && item.syllabus_tags.length > 0) {
+            text += `📚 Syllabus: ${item.syllabus_tags.join(', ')}\n\n`;
+        }
+        text += `📝 *Analysis:*\n${item.description}\n\n`;
+        if (item.points && item.points.length > 0) {
+            text += `📌 *Key Points:*\n`;
+            item.points.forEach((pt, idx) => {
+                text += `${idx + 1}. ${pt.replace(/\*\*/g, '')}\n`;
+            });
+        }
+        text += `\n📲 Bodhak Smart Notes`;
+
+        if (target === 'whatsapp') {
+            window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+        } else {
+            window.open(`https://t.me/share/url?url=${encodeURIComponent(window.location.origin)}&text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
         }
     };
 
     const handleCopyItem = async (item: CurrentAffair, uniqueId: string) => {
         const title = item.title;
         const category = item.category;
-        const source = item.source || 'UPSC News';
+        const source = item.source || 'The Hindu';
         const date = item.date || new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
         
-        let contentHtml = `
-            <div style="font-family: 'Inter', sans-serif; color: #334155; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-                <h2 style="color: #1e293b; margin-top: 0; margin-bottom: 12px; font-size: 18px; border-bottom: 2px solid #6366f1; padding-bottom: 8px;">${title}</h2>
-                <div style="font-size: 11px; color: #6366f1; font-weight: 800; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.05em;">
-                    <span style="background: #eef2ff; padding: 4px 10px; border-radius: 6px; border: 1px solid #e0e7ff;">${category}</span> • 
-                    <span style="background: #f8fafc; padding: 4px 10px; border-radius: 6px; border: 1px solid #f1f5f9; color: #64748b;">${source}</span> • 
-                    <span style="color: #94a3b8;">${date}</span>
-                </div>
-        `;
-
         let contentText = `${title}\n`;
         contentText += `${category} | ${source} | ${date}\n\n`;
+        if (item.syllabus_tags && item.syllabus_tags.length > 0) {
+            contentText += `Syllabus: ${item.syllabus_tags.join(', ')}\n\n`;
+        }
+        contentText += `Context & Overview:\n${item.description}\n\n`;
 
         if (item.points && item.points.length > 0) {
-            contentHtml += `<div style="background: #f8fafc; padding: 16px; border-radius: 8px; border-left: 4px solid #ef4444;">`;
+            contentText += `Key Examination Points:\n`;
             item.points.forEach((point, idx) => {
-                const cleanPoint = point.replace(/\*\*(.*?)\*\*/g, '<strong style="color: #111827; background: #fef9c3; padding: 0 2px;">$1</strong>');
-                contentHtml += `<div style="display: flex; margin-bottom: 12px; font-size: 14px; line-height: 1.6;">
-                    <span style="background: #fee2e2; color: #b91c1c; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; margin-right: 12px; flex-shrink: 0;">${idx + 1}</span>
-                    <div style="color: #374151;">${cleanPoint}</div>
-                </div>`;
                 contentText += `${idx + 1}. ${point.replace(/\*\*/g, '')}\n`;
             });
-            contentHtml += `</div>`;
-        } else {
-            contentHtml += `<p style="font-size: 14px; line-height: 1.6; color: #4b5563;">${item.description}</p>`;
-            contentText += `${item.description}\n`;
         }
-
-        contentHtml += `
-            <div style="margin-top: 20px; padding-top: 12px; border-top: 1px solid #f1f5f9; text-align: center;">
-                <span style="font-size: 10px; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em;">Generated by Bodhak Smart Notes</span>
-            </div>
-        </div>`;
         contentText += `\nGenerated by Bodhak Smart Notes`;
 
         try {
-            if (typeof ClipboardItem !== 'undefined') {
-                const blobHtml = new Blob([contentHtml], { type: 'text/html' });
-                const blobText = new Blob([contentText], { type: 'text/plain' });
-                await navigator.clipboard.write([new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })]);
-            } else {
-                await navigator.clipboard.writeText(contentText);
-            }
+            await navigator.clipboard.writeText(contentText);
             setCopiedId(uniqueId);
             setTimeout(() => setCopiedId(null), 2000);
         } catch (err) {
             console.error('Clipboard write failed', err);
-            await navigator.clipboard.writeText(contentText);
-            setCopiedId(uniqueId);
-            setTimeout(() => setCopiedId(null), 2000);
         }
     };
-
-    const isItemSaved = (title: string) => savedAffairs.some(a => a.title === title);
 
     // Quiz State
     const [quiz, setQuiz] = useState<QuizQuestion[]>([]);
@@ -361,27 +418,21 @@ const CurrentAffairs: React.FC<CurrentAffairsProps> = ({ initialViewMode }) => {
         const hasPoints = item.points && item.points.length > 0;
         const hasSyllabus = item.syllabus_tags && item.syllabus_tags.length > 0;
         const isHindu = viewType === 'the_hindu';
-        const isExpanded = !isHindu || expandedHinduIndex === idx;
+        const isExpanded = !isHindu ? true : (expandAllHindu ? (expandedHinduIndex !== -idx - 1) : expandedHinduIndex === idx);
 
         return (
             <motion.div
                 key={`${viewType}-${idx}`}
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.04 }}
-                onClick={() => {
-                    if (isHindu) {
-                        setExpandedHinduIndex(isExpanded ? null : idx);
-                    }
-                }}
-                className={`bg-white border rounded-2xl p-5 md:p-6 transition-all group relative overflow-hidden text-slate-800 ${
-                    isHindu ? 'cursor-pointer hover:shadow-md' : ''
-                } ${
+                transition={{ delay: Math.min(idx * 0.03, 0.3) }}
+                className={`bg-white border rounded-2xl p-5 md:p-6 transition-all relative overflow-hidden text-slate-800 shadow-sm ${
                     hasPoints 
-                        ? 'border-l-4 border-l-red-600 border-slate-205' 
+                        ? 'border-l-4 border-l-red-600 border-slate-205 hover:shadow-md' 
                         : 'border-slate-205 hover:border-indigo-400'
                 }`}
             >
+                {/* Card Header & Badges */}
                 <div className="flex justify-between items-start gap-4 mb-3">
                     <div className="flex items-center gap-2 flex-wrap">
                         <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 border ${
@@ -393,9 +444,9 @@ const CurrentAffairs: React.FC<CurrentAffairsProps> = ({ initialViewMode }) => {
                             {item.category}
                         </span>
                         
-                        <span className="px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-650 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 border border-slate-200 italic">
+                        <span className="px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-650 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 border border-slate-200">
                             <Newspaper className={`h-2.5 w-2.5 ${hasPoints ? 'text-red-650' : 'text-indigo-600'}`} />
-                            {item.source || 'UPSC News'}
+                            {item.source || 'The Hindu'}
                         </span>
                         
                         <span className="flex items-center gap-1 text-[10px] text-slate-450 font-bold uppercase tracking-wider">
@@ -403,13 +454,33 @@ const CurrentAffairs: React.FC<CurrentAffairsProps> = ({ initialViewMode }) => {
                             {item.date || new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </span>
                     </div>
-                    <div className="flex items-center gap-2">
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        {isHindu && (
+                            <>
+                                <button
+                                    onClick={() => handleShareSingleItem(item, 'whatsapp')}
+                                    title="Share to WhatsApp"
+                                    className="p-1.5 sm:p-2 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-all border border-emerald-200"
+                                >
+                                    <MessageCircle className="h-4 w-4" />
+                                </button>
+                                <button
+                                    onClick={() => handleShareSingleItem(item, 'telegram')}
+                                    title="Share to Telegram"
+                                    className="p-1.5 sm:p-2 rounded-xl bg-sky-50 text-sky-600 hover:bg-sky-600 hover:text-white transition-all border border-sky-200"
+                                >
+                                    <Send className="h-4 w-4" />
+                                </button>
+                            </>
+                        )}
                         <button 
                             onClick={(e) => {
                                 e.stopPropagation();
                                 handleCopyItem(item, `${viewType}-${idx}`);
                             }}
-                            className={`p-2 rounded-xl transition-all border flex items-center gap-1.5 ${copiedId === `${viewType}-${idx}` ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-450 hover:text-indigo-600 hover:bg-indigo-50 border-slate-200'}`}
+                            title="Copy Note"
+                            className={`p-1.5 sm:p-2 rounded-xl transition-all border flex items-center gap-1 ${copiedId === `${viewType}-${idx}` ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-450 hover:text-indigo-600 hover:bg-indigo-50 border-slate-200'}`}
                         >
                             <Copy className="h-4 w-4" />
                             {copiedId === `${viewType}-${idx}` && <span className="text-[10px] font-black uppercase">Copied!</span>}
@@ -419,75 +490,114 @@ const CurrentAffairs: React.FC<CurrentAffairsProps> = ({ initialViewMode }) => {
                                 e.stopPropagation();
                                 toggleSave(item);
                             }}
-                            className={`p-2 rounded-xl transition-all ${isSaved ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100' : 'bg-slate-50 text-slate-450 hover:bg-slate-100 hover:text-slate-850 border border-slate-200'}`}
+                            title="Bookmark"
+                            className={`p-1.5 sm:p-2 rounded-xl transition-all ${isSaved ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100' : 'bg-slate-50 text-slate-450 hover:bg-slate-100 hover:text-slate-850 border border-slate-200'}`}
                         >
                             {isSaved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
                         </button>
                     </div>
                 </div>
                 
-                <h3 className={`text-base md:text-lg font-bold transition-colors leading-tight pr-10 ${
+                {/* Title */}
+                <h3 className={`text-base md:text-lg font-bold leading-tight ${
                     hasPoints 
-                        ? 'font-serif text-slate-900 group-hover:text-red-700' 
-                        : 'text-slate-850 group-hover:text-indigo-600'
+                        ? 'font-serif text-slate-900' 
+                        : 'text-slate-850'
                 } ${isHindu ? 'mb-2' : 'mb-3'}`}>
+                    <span className="text-red-600 font-sans mr-2 font-black">#{idx + 1}</span>
                     {item.title}
                 </h3>
 
-                {isExpanded ? (
-                    <>
-                        {/* UPSC GS Syllabus Tags */}
-                        {hasSyllabus && item.syllabus_tags && (
-                            <div className="flex flex-wrap gap-1.5 mt-1.5 mb-4">
-                                {item.syllabus_tags.map((tag, tagIdx) => (
-                                    <span key={tagIdx} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-extrabold border border-slate-250 flex items-center gap-1">
-                                        📚 {tag}
-                                    </span>
-                                ))}
+                {/* UPSC GS Syllabus Tags */}
+                {hasSyllabus && item.syllabus_tags && (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5 mb-3">
+                        {item.syllabus_tags.map((tag, tagIdx) => (
+                            <span key={tagIdx} className="px-2.5 py-0.5 rounded-lg bg-indigo-50/80 text-indigo-750 text-[10px] font-extrabold border border-indigo-150 flex items-center gap-1">
+                                📚 {tag}
+                            </span>
+                        ))}
+                    </div>
+                )}
+
+                {/* Collapsible Content Trigger (for The Hindu) */}
+                {isHindu && (
+                    <div className="flex items-center justify-between my-2 pt-1">
+                        <button
+                            onClick={() => {
+                                if (expandAllHindu) {
+                                    setExpandedHinduIndex(expandedHinduIndex === -idx - 1 ? null : -idx - 1);
+                                } else {
+                                    setExpandedHinduIndex(expandedHinduIndex === idx ? null : idx);
+                                }
+                            }}
+                            className="text-xs font-bold text-red-650 hover:text-red-700 flex items-center gap-1.5 bg-red-50/80 px-3 py-1 rounded-lg border border-red-150 transition-colors"
+                        >
+                            {isExpanded ? (
+                                <>
+                                    <span>{language === 'hi' ? 'संक्षिप्त विवरण छुपाएं' : 'Hide Detailed Analysis'}</span>
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                </>
+                            ) : (
+                                <>
+                                    <span>{language === 'hi' ? 'विस्तृत विश्लेषण व 5+ बिंदु देखें' : 'View Detailed Analysis & 5+ Points'}</span>
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                </>
+                            )}
+                        </button>
+                    </div>
+                )}
+
+                {isExpanded && (
+                    <div className="mt-3 space-y-4">
+                        {/* 100+ Words Context & Analytical Overview */}
+                        {item.description && (
+                            <div className="bg-amber-50/40 border border-amber-200/60 rounded-xl p-4 text-xs md:text-sm">
+                                <div className="text-[11px] font-black uppercase tracking-wider text-amber-900 mb-1.5 flex items-center gap-1.5">
+                                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                                    {language === 'hi' ? 'विस्तृत संदर्भ व विश्लेषण (Overview)' : 'Detailed Context & Analytical Background'}
+                                </div>
+                                <p className="text-slate-700 leading-relaxed font-semibold">
+                                    {renderBoldText(item.description)}
+                                </p>
                             </div>
                         )}
 
-                        {/* Structured Multi-bullet Points with custom layouts & bold term styling */}
-                        {hasPoints && item.points && item.points.length > 0 ? (
-                            <div className="space-y-4 bg-slate-50/50 p-4 rounded-xl border border-slate-100 mb-4 text-xs md:text-sm">
+                        {/* Structured 5+ Points with custom badge and bold terms */}
+                        {hasPoints && item.points && (
+                            <div className="space-y-2.5 bg-slate-50 p-4 rounded-xl border border-slate-200/80 text-xs md:text-sm">
+                                <div className="text-[11px] font-black uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-red-600" />
+                                    {language === 'hi' ? 'मुख्य परीक्षा बिंदु (Minimum 5 Key Points)' : 'Key Examination Points (5+ Structured Points)'}
+                                </div>
                                 {item.points.map((point, pIdx) => (
-                                    <div key={pIdx} className="flex items-start gap-3">
-                                        <span className="w-5 h-5 rounded-full bg-red-100 text-red-700 font-extrabold flex items-center justify-center text-[10px] mt-0.5 shrink-0 shadow-sm border border-red-200/50">
+                                    <div key={pIdx} className="flex items-start gap-2.5 bg-white p-2.5 rounded-lg border border-slate-150 shadow-2xs">
+                                        <span className="w-5 h-5 rounded-full bg-red-100 text-red-700 font-black flex items-center justify-center text-[10px] mt-0.5 shrink-0 shadow-2xs border border-red-200">
                                             {pIdx + 1}
                                         </span>
                                         <div className="flex-1">
-                                            <p className="text-slate-700 font-semibold leading-relaxed">
+                                            <p className="text-slate-800 font-semibold leading-relaxed">
                                                 {renderBoldText(point)}
                                             </p>
                                         </div>
                                     </div>
                                 ))}
                             </div>
-                        ) : (
-                            <p className="text-slate-600 text-xs md:text-sm leading-relaxed mb-4 font-semibold">
-                                {item.description}
-                            </p>
                         )}
-                    </>
-                ) : null}
+                    </div>
+                )}
 
-                <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-450 font-black font-mono">
+                <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100 text-[10px] text-slate-450 font-bold">
+                    <div className="flex items-center gap-1.5">
                         <Clock className={`h-3 w-3 ${hasPoints ? 'text-red-500' : 'text-slate-400'}`} />
-                        {hasPoints ? (language === 'hi' ? 'द हिन्दू' : 'The Hindu') : t.updatedAt}
+                        <span>{hasPoints ? (language === 'hi' ? 'द हिन्दू दैनिक विश्लेषण' : 'The Hindu Daily Analysis') : t.updatedAt}</span>
                     </div>
 
-                    {!isHindu && !hasPoints && (
-                        <button className="text-[10px] font-black text-indigo-600 flex items-center gap-1 hover:gap-2 transition-all opacity-0 group-hover:opacity-100 uppercase tracking-widest">
-                            {t.learnMore} <ArrowUpRight className="h-3 w-3" />
-                        </button>
+                    {isHindu && (
+                        <span className="text-slate-500 font-bold">
+                            {item.points ? `${item.points.length} Points` : ''} • UPSC GS Mains/Prelims
+                        </span>
                     )}
                 </div>
-
-                {/* Decorative subtle background gradient */}
-                {!hasPoints && (
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 blur-3xl rounded-full -mr-16 -mt-16 pointer-events-none group-hover:bg-indigo-500/10 transition-all"></div>
-                )}
             </motion.div>
         );
     };
@@ -677,7 +787,103 @@ const CurrentAffairs: React.FC<CurrentAffairsProps> = ({ initialViewMode }) => {
                                     </button>
                                 </div>
                             ) : (
-                                <div className="space-y-4 w-full">
+                                <div className="space-y-5 w-full">
+                                    {/* The Hindu Sharing & Control Toolbar */}
+                                    <div className="bg-gradient-to-r from-red-900 via-slate-900 to-slate-900 text-white p-5 rounded-3xl shadow-md border border-red-800/40 relative overflow-hidden">
+                                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="px-2.5 py-0.5 bg-red-600 text-white rounded-md text-[10px] font-black uppercase tracking-wider">
+                                                        THE HINDU DAILY
+                                                    </span>
+                                                    <span className="text-xs font-bold text-slate-300">
+                                                        {theHinduArticles.length} {language === 'hi' ? 'महत्वपूर्ण समाचार व 5+ बिंदु' : 'Curated Articles with 5+ Points'}
+                                                    </span>
+                                                </div>
+                                                <h3 className="text-base sm:text-lg font-black tracking-tight text-white">
+                                                    {language === 'hi' ? 'द हिन्दू दैनिक समाचार डाइजेस्ट' : 'The Hindu Daily UPSC Digest'}
+                                                </h3>
+                                                <p className="text-xs text-slate-300 font-medium mt-0.5">
+                                                    {language === 'hi' 
+                                                        ? 'सभी 10 समाचारों को एक साथ अपने WhatsApp, Telegram पर शेयर करें' 
+                                                        : 'Share all daily news analysis in 1-click via WhatsApp, Telegram or Copy'}
+                                                </p>
+                                            </div>
+
+                                            {/* Action Buttons */}
+                                            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                                                {/* WhatsApp Share All */}
+                                                <button
+                                                    onClick={() => handleShareAllHindu('whatsapp')}
+                                                    className="flex-1 sm:flex-none px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95"
+                                                    title="Share All to WhatsApp"
+                                                >
+                                                    <MessageCircle className="w-4 h-4" />
+                                                    <span>WhatsApp</span>
+                                                </button>
+
+                                                {/* Telegram Share All */}
+                                                <button
+                                                    onClick={() => handleShareAllHindu('telegram')}
+                                                    className="flex-1 sm:flex-none px-4 py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95"
+                                                    title="Share All to Telegram"
+                                                >
+                                                    <Send className="w-4 h-4" />
+                                                    <span>Telegram</span>
+                                                </button>
+
+                                                {/* Native Share / Copy All */}
+                                                <button
+                                                    onClick={() => handleShareAllHindu('native')}
+                                                    className="px-3.5 py-2.5 bg-white/15 hover:bg-white/25 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 backdrop-blur-sm border border-white/20 active:scale-95"
+                                                    title="Share All / Copy"
+                                                >
+                                                    <Share2 className="w-4 h-4" />
+                                                    <span className="hidden sm:inline">{language === 'hi' ? 'शेयर' : 'Share All'}</span>
+                                                </button>
+
+                                                <button
+                                                    onClick={() => handleShareAllHindu('copy')}
+                                                    className="px-3.5 py-2.5 bg-white/15 hover:bg-white/25 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 backdrop-blur-sm border border-white/20 active:scale-95"
+                                                    title="Copy all 10 items"
+                                                >
+                                                    <Copy className="w-4 h-4" />
+                                                    <span className="hidden sm:inline">{language === 'hi' ? 'सभी कॉपी' : 'Copy All'}</span>
+                                                </button>
+
+                                                {/* Expand / Collapse All Toggle */}
+                                                <button
+                                                    onClick={() => {
+                                                        setExpandAllHindu(prev => !prev);
+                                                        setExpandedHinduIndex(null);
+                                                    }}
+                                                    className="px-3 py-2 bg-black/30 hover:bg-black/50 text-slate-200 rounded-xl text-[11px] font-bold border border-white/10 flex items-center gap-1 transition-all"
+                                                >
+                                                    {expandAllHindu ? (
+                                                        <>
+                                                            <ChevronUp className="w-3.5 h-3.5" />
+                                                            <span>{language === 'hi' ? 'सभी संक्षिप्त करें' : 'Collapse'}</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <ChevronDown className="w-3.5 h-3.5" />
+                                                            <span>{language === 'hi' ? 'सभी विस्तार करें' : 'Expand'}</span>
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Toast Feedback */}
+                                        {shareToast && (
+                                            <div className="mt-3 pt-2.5 border-t border-white/15 flex items-center gap-2 text-xs font-bold text-emerald-300 animate-fadeIn">
+                                                <Check className="w-4 h-4" />
+                                                <span>{shareToast}</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Articles List */}
                                     <div className="space-y-4">
                                         {theHinduArticles.map((item, idx) => renderCard(item, idx, 'the_hindu'))}
                                     </div>

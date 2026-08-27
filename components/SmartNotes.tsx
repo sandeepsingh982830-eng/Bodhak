@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { NoteConfig, SavedNote } from '../types';
+import { NoteConfig, SavedNote, NoteTemplate } from '../types';
 import { saveNote, getSavedNotes, deleteNote } from '../services/storageService';
 import { generateNotes, extractTextFromImage } from '../services/geminiService';
-import { BookOpen, FileText, Trash2, Loader2, FileUp, Save, Download, HelpCircle, X, Copy, PanelLeft, Sparkles, Clock, ArrowUpRight, Brain, Tag, Calendar, Search, Cloud, BookmarkPlus, CheckCircle } from 'lucide-react';
+import { BookOpen, FileText, Trash2, Loader2, FileUp, Save, Download, HelpCircle, X, Copy, PanelLeft, Sparkles, Clock, ArrowUpRight, Brain, Tag, Calendar, Search, Cloud, BookmarkPlus, CheckCircle, Layout, Palette, Columns, Grid, AlignLeft } from 'lucide-react';
 import Markdown from 'react-markdown';
 import html2pdf from 'html2pdf.js';
 import { BodhakLogo } from './Layout';
@@ -12,6 +12,7 @@ import { AnimatePresence } from 'motion/react';
 import { BookRecommendations } from './BookRecommendations';
 import { db } from '../services/firebase';
 import { collection, getDocs, addDoc } from 'firebase/firestore';
+import NoteTemplateRenderer, { TEMPLATE_OPTIONS, TemplateMiniWireframe } from './NoteTemplateRenderer';
 
 interface SmartNotesProps {}
 
@@ -21,34 +22,28 @@ const INFO_TEXT = `**Bodhak: Smart Notes** is a smart tool designed to convert a
 
 * **Source Upload:** You can provide the study material by clicking "UPLOAD SOURCE" to add documents or paste a URL.
 * **Multilingual Support:** The tool allows you to generate notes in English (ENG), Hindi (HIN), or Punjabi (PNB).
-* **Custom Formats:** You can choose the layout of your notes based on your study needs:
+* **Custom Formats:**
   * **Smart:** Focuses on key topic keywords and vital terms for rapid scanning (max limit).
   * **Detail:** In-depth and comprehensive information.
   * **Point:** Bullet points, which are great for quick revisions.
-
-* **Include Add-ons (Toggles):** You can toggle specific elements to enhance your notes:
+* **Educational Templates (टेम्पलेट्स):**
+  * **A4 Educational Infographic:** Clean vertical infographic with top decorative title frame, wide definition box, colorful gradient sub-heading cards (orange, teal, purple, emerald, rose) with icons and neat bullet points.
+  * **Cornell Study Sheet:** 2-column layout (left cue keywords, right detailed notes, bottom summary).
+  * **Cheat Sheet Grid:** High-density bento grid for quick exam revision.
+  * **Editorial Brief:** Refined editorial typography and callouts.
+  * **Classic Document:** Standard linear study sheets.
+* **Include Add-ons (Toggles):**
   * **Current Affairs:** Adds recent developments related to the topic.
-  * **Vocabulary:** Adds a list of difficult words with their meanings (e.g., English terms for Hindi concepts).
-
-* **Word Limit:** You can set a specific length for your notes using the "LIMIT" box (e.g., 1000 words).
-* **My Notebook:** A sidebar section that acts as a library for all your saved notes (like your saved "polity" notes).
-* **Utility Buttons:** Options to **Read** the notes aloud (Text-to-Speech) or view them in **Full Screen**.
-
----
-
-### **How It Works**
-
-1. **Define the Topic:** Type in the 'Subject' (e.g., Polity) and the specific 'Topic' (e.g., PM) at the top.
-2. **Provide Information:** Upload your source material or paste a reference link in the 'SOURCE MATERIAL' section.
-3. **Set Preferences:** Select your preferred language (ENG, HIN, or PNB) and pick the format you want (Smart, Detail, or Point).
-4. **Add Extras:** Toggle on Current Affairs, Visuals, or Vocabulary if you need them, and set your desired word limit.
-5. **Generate:** Once everything is set, click the **"GENERATE DETAILED NOTES"** button. The AI processes the material and creates structured, printable study sheets in seconds.`;
+  * **Vocabulary:** Adds a list of difficult words with their meanings.
+* **Word Limit:** You can set a specific length for your notes.
+* **My Notebook:** A library for all your saved notes with 1-click live template switching.`;
 
 const INITIAL_CONFIG: NoteConfig = {
     subject: '',
     topic: '',
     language: 'English',
     format: 'Detail',
+    template: 'infographic',
     includeCurrentAffairs: false,
     includeVocabulary: false,
     wordLimit: 1000
@@ -655,7 +650,7 @@ const SmartNotes: React.FC<SmartNotesProps> = () => {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {/* Format */}
                                 <div>
-                                     <label className="text-[10px] text-indigo-600 uppercase font-black tracking-wider ml-1 mb-2 block">Format</label>
+                                     <label className="text-[10px] text-indigo-600 uppercase font-black tracking-wider ml-1 mb-2 block">Format / फॉर्मेट</label>
                                      <div className="grid grid-cols-3 gap-2">
                                         {['Smart', 'Detail', 'Point'].map(f => (
                                             <button
@@ -712,6 +707,68 @@ const SmartNotes: React.FC<SmartNotesProps> = () => {
                                     </div>
                                 </div>
                             </div>
+
+                            {/* Templet / Template Selection Section */}
+                            <div className="mt-6 pt-5 border-t border-slate-150">
+                                <div className="flex items-center justify-between mb-3.5">
+                                    <label className="text-[11px] text-indigo-600 uppercase font-black tracking-wider flex items-center gap-1.5">
+                                        <Palette className="w-3.5 h-3.5" />
+                                        <span>Templet / नोट्स टेम्पलेट चुनें</span>
+                                    </label>
+                                    <span className="text-[10px] text-slate-400 font-bold">Visual Layout Style Preview</span>
+                                </div>
+
+                                {/* 2 facing each other on mobile (grid-cols-2), 4 in rows on laptop (lg:grid-cols-4) */}
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+                                    {TEMPLATE_OPTIONS.map((tmpl) => {
+                                        const isSelected = (config.template || 'infographic') === tmpl.id;
+                                        return (
+                                            <button
+                                                key={tmpl.id}
+                                                type="button"
+                                                onClick={() => handleChange('template', tmpl.id)}
+                                                className={`group relative text-left p-2.5 sm:p-3 rounded-2xl border-2 transition-all aspect-square flex flex-col justify-between overflow-hidden ${
+                                                    isSelected 
+                                                        ? 'border-indigo-600 bg-indigo-50/40 shadow-md ring-2 ring-indigo-500/25' 
+                                                        : 'border-slate-200 bg-white hover:border-indigo-300 hover:bg-slate-50/80 text-slate-700 shadow-2xs'
+                                                }`}
+                                            >
+                                                {tmpl.badge && (
+                                                    <span className={`absolute top-2 right-2 z-10 text-[8px] sm:text-[9px] font-black uppercase px-1.5 sm:px-2 py-0.5 rounded-full shadow-2xs ${
+                                                        isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-900/80 text-white backdrop-blur-xs'
+                                                    }`}>
+                                                        {tmpl.badge}
+                                                    </span>
+                                                )}
+
+                                                {/* Visual Preview Wireframe Thumbnail */}
+                                                <div className={`w-full flex-1 min-h-0 rounded-xl overflow-hidden mb-2 p-1 flex items-center justify-center border transition-all ${
+                                                    isSelected ? 'bg-white border-indigo-200 shadow-2xs' : 'bg-slate-50/80 border-slate-200/70 group-hover:border-indigo-200 group-hover:bg-white'
+                                                }`}>
+                                                    <div className="w-full h-full transform transition-transform duration-200 group-hover:scale-[1.02]">
+                                                        <TemplateMiniWireframe templateId={tmpl.id} isSelected={isSelected} />
+                                                    </div>
+                                                </div>
+
+                                                {/* Template Meta & Selection Indicator */}
+                                                <div className="w-full pt-1.5 border-t border-slate-150/80 flex items-center justify-between gap-1">
+                                                    <div className="flex items-center gap-1.5 min-w-0">
+                                                        <span className="text-sm flex-shrink-0">{tmpl.icon}</span>
+                                                        <span className="font-extrabold text-[11px] sm:text-xs text-slate-900 truncate leading-tight">
+                                                            {tmpl.shortName || tmpl.name}
+                                                        </span>
+                                                    </div>
+                                                    <span className={`text-[8px] sm:text-[9px] font-black uppercase px-1.5 py-0.5 rounded shrink-0 ${
+                                                        isSelected ? 'bg-indigo-600 text-white' : 'text-slate-400 bg-slate-100'
+                                                    }`}>
+                                                        {isSelected ? '✓ Selected' : tmpl.hindiName}
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                          </div>
 
                          {config.topic && <BookRecommendations topic={config.topic} />}
@@ -735,12 +792,12 @@ const SmartNotes: React.FC<SmartNotesProps> = () => {
                          </button>
                      </div>
                 ) : (
-                    <div className="flex flex-col h-full bg-white text-slate-800 overflow-hidden shadow-2xl">
+                    <div className="flex flex-col h-full bg-slate-100 text-slate-800 overflow-hidden shadow-2xl">
                         {/* Notes Toolbar */}
-                        <div className="bg-slate-50 border-b border-slate-200 p-3 flex justify-between items-center z-10 shadow-sm font-semibold">
+                        <div className="bg-white border-b border-slate-200 p-3 flex flex-wrap justify-between items-center z-10 shadow-xs font-semibold gap-3">
                             <div className="flex items-center space-x-3">
                                 {!isSidebarOpen && (
-                                    <button onClick={() => setIsSidebarOpen(true)} className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-500 transition" title="Show Sidebar">
+                                    <button onClick={() => setIsSidebarOpen(true)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition" title="Show Sidebar">
                                         <PanelLeft className="w-4 h-4" />
                                     </button>
                                 )}
@@ -749,6 +806,35 @@ const SmartNotes: React.FC<SmartNotesProps> = () => {
                                 </div>
                                 <h2 className="font-bold text-base md:text-lg text-slate-800"><span className="opacity-50">Bodhak:</span> Notes</h2>
                             </div>
+
+                            {/* Live Template Switcher in Toolbar */}
+                            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 overflow-x-auto max-w-full">
+                                {TEMPLATE_OPTIONS.map((tmpl) => {
+                                    const isCurrent = (activeNote.config.template || 'infographic') === tmpl.id;
+                                    return (
+                                        <button
+                                            key={tmpl.id}
+                                            onClick={() => {
+                                                const updated = {
+                                                    ...activeNote,
+                                                    config: { ...activeNote.config, template: tmpl.id }
+                                                };
+                                                setActiveNote(updated);
+                                            }}
+                                            className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition-all flex items-center gap-1 whitespace-nowrap ${
+                                                isCurrent 
+                                                    ? 'bg-indigo-600 text-white shadow-xs' 
+                                                    : 'text-slate-600 hover:text-indigo-600 hover:bg-white/60'
+                                            }`}
+                                            title={tmpl.name}
+                                        >
+                                            <span>{tmpl.icon}</span>
+                                            <span className="hidden sm:inline">{tmpl.name.split(' ')[0]}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
                             <div className="flex items-center space-x-2 text-xs md:text-sm">
                                 <button 
                                     onClick={handleCopy}
@@ -762,73 +848,27 @@ const SmartNotes: React.FC<SmartNotesProps> = () => {
                                     className="px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-lg text-xs font-black flex items-center space-x-2 transition-all shadow-sm"
                                 >
                                     <Download className="w-3.5 h-3.5 text-indigo-600" />
-                                    <span>Download</span>
+                                    <span>Download PDF</span>
                                 </button>
                             </div>
                         </div>
 
-                        {/* Document Content */}
-                        <div className="flex-1 overflow-y-auto p-4 md:p-8 relative bg-white pb-24 text-slate-800">
-                           <div id="note-content-to-print" className="w-full max-w-6xl mx-auto px-4 md:px-8 bg-white text-slate-800 printable-notes font-sans">
-                              <h1 className="note-copy-header text-2xl md:text-3xl font-black text-slate-800 mb-2 border-b-2 border-indigo-400 pb-4 text-center leading-snug">{activeNote.config.subject}: {activeNote.config.topic}</h1>
-                              <div className="note-copy-header text-center text-[10px] text-indigo-500 font-black tracking-[0.25em] mb-12 uppercase">Bodhak: Smart Notes</div>
-                              
-                              {/* Handwritten Note Image (Smart Format) */}
-                              {activeNote.handwrittenImageUrl && (
-                                  <div className="mb-12 flex flex-col items-center">
-                                      <div className="relative group max-w-3xl w-full border-4 border-white shadow-2xl rounded-sm overflow-hidden transform rotate-1">
-                                          <img 
-                                              src={activeNote.handwrittenImageUrl} 
-                                              alt="Handwritten Study Note" 
-                                              className="w-full h-auto"
-                                              referrerPolicy="no-referrer"
-                                          />
-                                          <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                                             <a 
-                                                href={activeNote.handwrittenImageUrl} 
-                                                download={`Handwritten_${activeNote.config.topic}.png`}
-                                                className="bg-black/60 hover:bg-black/80 text-white p-3 rounded-full backdrop-blur-md shadow-xl flex items-center justify-center transition-all"
-                                                title="Download Handwritten Note"
-                                             >
-                                                <Download className="w-5 h-5" />
-                                             </a>
-                                          </div>
-                                      </div>
-                                      <p className="mt-4 text-[11px] font-mono uppercase tracking-[0.3em] text-slate-400 font-bold">Handwritten Concept Mapper</p>
-                                  </div>
-                              )}
-
-                              {/* Content styling for the document */}
-                              {activeNote.config.format !== 'Smart' ? (
-                                  <div className="prose prose-slate prose-indigo max-w-none 
-                                    prose-headings:font-black prose-headings:text-slate-800
-                                    prose-h2:text-lg prose-h2:border-b prose-h2:pb-2
-                                    prose-p:text-slate-650 prose-p:leading-relaxed prose-p:text-sm md:prose-p:text-base prose-p:font-semibold
-                                    prose-blockquote:border-l-4 prose-blockquote:border-yellow-400 prose-blockquote:bg-yellow-50/50 prose-blockquote:p-4 prose-blockquote:rounded-r-lg prose-blockquote:not-italic prose-blockquote:text-slate-700
-                                    prose-ul:text-slate-650 prose-li:marker:text-indigo-600
-                                    prose-pre:bg-white prose-pre:text-slate-800 prose-pre:border prose-pre:border-slate-200
-                                    [&>blockquote>p]:m-0
-                                  ">
-                                      <Markdown>{activeNote.content}</Markdown>
-                                  </div>
-                              ) : (
-                                  <div className="mt-8 pt-8 border-t border-slate-100 text-center font-semibold">
-                                      <p className="text-slate-450 text-xs italic mb-4">Text notes are generated in the background for reference.</p>
-                                      <button 
-                                          onClick={() => {
-                                            const config = {...activeNote.config, format: 'Point' as any};
-                                            const updatedNote = {...activeNote, config};
-                                            setActiveNote(updatedNote);
-                                          }}
-                                          className="text-[10px] font-black text-indigo-650 hover:text-indigo-750 uppercase tracking-widest border-b border-indigo-200 pb-0.5 transition-all"
-                                      >
-                                          View Textual Overview
-                                      </button>
-                                  </div>
-                              )}
+                        {/* Document Content with Template Renderer */}
+                        <div className="flex-1 overflow-y-auto p-4 md:p-8 relative bg-slate-100/60 pb-24 text-slate-800">
+                           <div id="note-content-to-print" className="w-full max-w-4xl mx-auto printable-notes">
+                               <NoteTemplateRenderer 
+                                   note={activeNote}
+                                   activeTemplate={activeNote.config.template || 'infographic'}
+                                   onSelectTemplate={(t) => {
+                                       setActiveNote({
+                                           ...activeNote,
+                                           config: { ...activeNote.config, template: t }
+                                       });
+                                   }}
+                               />
                            </div>
 
-                           <div className="w-full max-w-6xl mx-auto px-4 md:px-8 mt-12 pt-6 border-t border-slate-100">
+                           <div className="w-full max-w-4xl mx-auto mt-12 pt-6 border-t border-slate-200">
                                <BookRecommendations topic={activeNote.config.topic || activeNote.config.subject} />
                            </div>
                         </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AppStep } from '../types';
+import { AppStep, NoteTemplate } from '../types';
 import { 
     Zap, FileText, FileSearch, CheckCircle, Newspaper, ArrowRight, Coins, 
     Bell, Sparkles, BookOpen, Clock, FolderOpen, ShoppingBag, Pin, ChevronLeft, ChevronRight, X,
@@ -11,6 +11,8 @@ import { db } from '../services/firebase';
 import { collection, query, onSnapshot, deleteDoc, doc, setDoc, orderBy, limit, where } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../hooks/useAuth';
+import NoteTemplateRenderer, { TEMPLATE_OPTIONS } from './NoteTemplateRenderer';
+import html2pdf from 'html2pdf.js';
 
 interface HomeDashboardProps {
     onNavigate: (step: AppStep) => void;
@@ -167,11 +169,15 @@ const PinnedMaterialTiltCard: React.FC<PinnedMaterialCardProps> = ({ item, isMan
                             />
                         </div>
                     ) : (
-                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-700 to-violet-600 text-white p-3 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform duration-300 mb-1.5">
+                        <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-2xl ${
+                            item.type === 'note' || item.quizData ? 'bg-gradient-to-tr from-emerald-600 via-teal-600 to-emerald-700' : 'bg-gradient-to-tr from-indigo-600 via-indigo-700 to-violet-600'
+                        } text-white p-3 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform duration-300 mb-1.5`}>
                             {item.type === 'link' ? (
                                 <ExternalLink className="w-8 h-8" />
                             ) : item.type === 'quiz' ? (
                                 <Award className="w-8 h-8 text-amber-300" />
+                            ) : item.type === 'note' ? (
+                                <BookOpen className="w-8 h-8 text-emerald-200" />
                             ) : (
                                 <FileText className="w-8 h-8" />
                             )}
@@ -179,10 +185,10 @@ const PinnedMaterialTiltCard: React.FC<PinnedMaterialCardProps> = ({ item, isMan
                     )}
 
                     <p className="font-extrabold text-[11px] sm:text-xs text-slate-800 line-clamp-1 leading-tight group-hover:text-indigo-600 transition-colors w-full px-1">
-                        {item.name || (item.type === 'quiz' ? 'Quiz Material' : 'Study Link')}
+                        {item.name || (item.type === 'quiz' ? 'Quiz Material' : (item.type === 'note' ? 'Study Note' : 'Study Link'))}
                     </p>
                     <span className="text-[9px] font-black text-indigo-600 bg-indigo-50/90 px-2.5 py-0.5 rounded-full mt-1.5 border border-indigo-100 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                        {item.type === 'quiz' ? (lang === 'hi' ? 'क्विज़ खोलें' : 'Open Quiz') : (lang === 'hi' ? 'खोलें ↗' : 'Open ↗')}
+                        {item.type === 'quiz' ? (lang === 'hi' ? 'क्विज़ खोलें' : 'Open Quiz') : (item.type === 'note' ? (lang === 'hi' ? 'नोट्स पढ़ें 📖' : 'Read Notes 📖') : (lang === 'hi' ? 'खोलें ↗' : 'Open ↗'))}
                     </span>
                 </div>
             </div>
@@ -214,6 +220,9 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate, profil
     const [quizAnswers, setQuizAnswers] = useState<Record<number, number | string>>({});
     const [showQuizResult, setShowQuizResult] = useState<boolean>(false);
     const [activePreviewFile, setActivePreviewFile] = useState<any | null>(null);
+    const [activeNoteFile, setActiveNoteFile] = useState<any | null>(null);
+    const [freeNoteTemplate, setFreeNoteTemplate] = useState<NoteTemplate>('infographic');
+    const [noteCopied, setNoteCopied] = useState<boolean>(false);
 
     const [streakSettings, setStreakSettings] = useState<any>({
         day7: 50,
@@ -235,14 +244,24 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate, profil
             setQuizAnswers({});
             setShowQuizResult(false);
             setActiveQuizFile(item);
+        } else if (item.type === 'note' || item.noteData) {
+            setActiveNoteFile(item);
+            setNoteCopied(false);
         } else if (item.url && /^https?:\/\//i.test(item.url)) {
             window.open(item.url, '_blank', 'noopener,noreferrer');
         } else if (item.fileData || (item.url && item.url.startsWith('data:'))) {
-            setActivePreviewFile({
-                name: item.name,
-                fileData: item.fileData || item.url,
-                fileName: item.name
-            });
+            // Check if file is note format
+            const raw = item.fileData || item.url || '';
+            if (raw.includes('# ') || raw.includes('## ') || raw.includes('{"content"')) {
+                setActiveNoteFile(item);
+                setNoteCopied(false);
+            } else {
+                setActivePreviewFile({
+                    name: item.name,
+                    fileData: item.fileData || item.url,
+                    fileName: item.name
+                });
+            }
         } else {
             onNavigate('free-m');
         }
@@ -881,7 +900,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate, profil
                 </div>
 
                 {/* Staggered Modern Grid with beautiful hover and transition mechanics */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     {tools.map((tool, idx) => {
                         const IconComponent = tool.icon;
                         return (
@@ -1638,6 +1657,123 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate, profil
                                 {lang === 'hi' ? 'बंद करें' : 'Close'}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Interactive Note Reader Modal for Pinned Free Notes */}
+            {activeNoteFile && (
+                <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md z-[180] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] flex flex-col border border-slate-100 shadow-2xl overflow-hidden text-left">
+                        {(() => {
+                            const noteContent = activeNoteFile.noteData?.content || activeNoteFile.fileData || activeNoteFile.url || '';
+                            const handwrittenImg = activeNoteFile.noteData?.handwrittenImageUrl || '';
+                            const noteSubject = activeNoteFile.noteData?.config?.subject || activeNoteFile.folderName || 'Study Material';
+
+                            return (
+                                <>
+                                    <div className="p-4 sm:p-5 bg-slate-900 text-white flex flex-wrap justify-between items-center gap-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/30">
+                                                <BookOpen className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-extrabold text-sm sm:text-base leading-tight text-emerald-300">
+                                                    {activeNoteFile.name}
+                                                </h3>
+                                                <p className="text-[11px] text-slate-300 font-medium">
+                                                    {noteSubject} • Pinned Study Notes
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {/* Template Switcher Pills in Modal */}
+                                        <div className="flex items-center bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto">
+                                            {TEMPLATE_OPTIONS.map(tmpl => (
+                                                <button
+                                                    key={tmpl.id}
+                                                    onClick={() => setFreeNoteTemplate(tmpl.id)}
+                                                    className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                                                        freeNoteTemplate === tmpl.id ? 'bg-emerald-500 text-slate-950 font-extrabold shadow-xs' : 'text-slate-300 hover:text-white'
+                                                    }`}
+                                                >
+                                                    <span>{tmpl.icon}</span>
+                                                    <span className="hidden sm:inline">{tmpl.name.split(' ')[0]}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    if (noteContent) {
+                                                        navigator.clipboard.writeText(noteContent);
+                                                        setNoteCopied(true);
+                                                        setTimeout(() => setNoteCopied(false), 2000);
+                                                    }
+                                                }}
+                                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                                                title="Copy Text"
+                                            >
+                                                {noteCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                                <span>{noteCopied ? 'Copied!' : 'Copy'}</span>
+                                            </button>
+
+                                            <button
+                                                onClick={() => {
+                                                    const el = document.getElementById('home-pinned-note-content-area');
+                                                    if (!el) return;
+                                                    const opt = {
+                                                        margin: 10,
+                                                        filename: `${activeNoteFile.name.replace(/[^a-zA-Z0-9]/g, '_')}_Notes.pdf`,
+                                                        image: { type: 'jpeg' as const, quality: 0.98 },
+                                                        html2canvas: { scale: 2, useCORS: true },
+                                                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
+                                                    };
+                                                    html2pdf().set(opt).from(el).save();
+                                                }}
+                                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                                                title="Download PDF"
+                                            >
+                                                <Download className="w-3.5 h-3.5" />
+                                                <span>PDF</span>
+                                            </button>
+
+                                            <button 
+                                                onClick={() => setActiveNoteFile(null)}
+                                                className="p-2 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition cursor-pointer"
+                                            >
+                                                <X className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div id="home-pinned-note-content-area" className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 bg-slate-100/70">
+                                        <div className="w-full max-w-4xl mx-auto">
+                                            <NoteTemplateRenderer 
+                                                note={{
+                                                    config: activeNoteFile.noteData?.config || { subject: noteSubject, topic: activeNoteFile.name, language: 'English', format: 'Detail' },
+                                                    content: noteContent,
+                                                    handwrittenImageUrl: handwrittenImg,
+                                                    createdAt: activeNoteFile.createdAt
+                                                }}
+                                                activeTemplate={freeNoteTemplate}
+                                                onSelectTemplate={(t) => setFreeNoteTemplate(t)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="p-4 bg-white border-t border-slate-100 flex justify-end">
+                                        <button
+                                            onClick={() => setActiveNoteFile(null)}
+                                            className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                                        >
+                                            {lang === 'hi' ? 'बंद करें' : 'Close'}
+                                        </button>
+                                    </div>
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
             )}

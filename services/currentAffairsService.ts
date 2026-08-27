@@ -94,17 +94,60 @@ export const fetchDailyAffairs = async (lang: string = "en", topic: string = "",
     }
 };
 
-export const fetchTheHinduNews = async (lang: string = "en") => {
+export const fetchTheHinduNews = async (lang: string = "en", forceRefresh: boolean = false) => {
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const localKey = `bodhak_the_hindu_${lang}`;
+
+    // Fast-path: Check localStorage if not forcing refresh
+    if (!forceRefresh) {
+        try {
+            const cached = localStorage.getItem(localKey);
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (parsed?.dateKey === todayKey && Array.isArray(parsed.data) && parsed.data.length > 0) {
+                    // Start background refresh to stay in sync, but return cached immediately
+                    fetch(`/api/the-hindu?lang=${lang}`)
+                        .then(r => r.json())
+                        .then(freshData => {
+                            if (Array.isArray(freshData) && freshData.length > 0) {
+                                localStorage.setItem(localKey, JSON.stringify({ dateKey: todayKey, data: freshData }));
+                            }
+                        })
+                        .catch(() => {});
+                    return parsed.data as CurrentAffair[];
+                }
+            }
+        } catch (e) {}
+    }
+
     try {
-        const url = `/api/the-hindu?lang=${lang}`;
+        const url = `/api/the-hindu?lang=${lang}${forceRefresh ? '&refresh=true' : ''}`;
         const response = await fetch(url);
         const data = await response.json();
         if (!response.ok) {
             throw new Error(data.message || data.error || 'Failed to fetch The Hindu news');
         }
+        if (Array.isArray(data) && data.length > 0) {
+            try {
+                localStorage.setItem(localKey, JSON.stringify({
+                    dateKey: todayKey,
+                    data
+                }));
+            } catch (e) {}
+        }
         return data as CurrentAffair[];
     } catch (error: any) {
         console.error("Error fetching The Hindu news:", error);
+        // Fallback to local storage even if date differs
+        try {
+            const cached = localStorage.getItem(localKey);
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (parsed?.data && Array.isArray(parsed.data) && parsed.data.length > 0) {
+                    return parsed.data as CurrentAffair[];
+                }
+            }
+        } catch (e) {}
         throw error;
     }
 };

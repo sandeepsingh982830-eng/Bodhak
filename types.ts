@@ -48,6 +48,8 @@ export interface Question {
     syllabus_tags?: string[];
 }
 
+export type NoteTemplate = 'infographic' | 'cornell' | 'cheatsheet' | 'editorial' | 'classic';
+
 export interface NoteConfig {
     subject: string;
     topic: string;
@@ -55,6 +57,7 @@ export interface NoteConfig {
     sourceFileName?: string;
     language: 'English' | 'Hindi' | 'Punjabi';
     format: 'Smart' | 'Detail' | 'Point';
+    template?: NoteTemplate;
     includeCurrentAffairs: boolean;
     includeVocabulary: boolean;
     wordLimit: number;

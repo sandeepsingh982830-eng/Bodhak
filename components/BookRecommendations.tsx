@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingBag, ExternalLink, Loader2, ChevronRight, BookOpen, Share2, Check } from 'lucide-react';
+import { ShoppingBag, ExternalLink, Loader2, ChevronRight, BookOpen, Share2, Check, Sparkles } from 'lucide-react';
 import { db } from '../services/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { FileData } from '../types';
+import { identifyTopicTags } from '../services/geminiService';
 
 interface BookRecommendationsProps {
     topic: string;
@@ -14,30 +15,30 @@ const RELATION_MAPS: { [key: string]: string[] } = {
     polity: [
         "polity", "constitution", "pm", "parliament", "nyapalika", "judiciary", "article", "governor", 
         "president", "sansad", "samvidhan", "rajvyavastha", "lok sabha", "rajya sabha", "fundamental rights", 
-        "mool adhikar", "elections", "supreme court", "high court", "panchayat", "laxmikanth"
+        "mool adhikar", "elections", "supreme court", "high court", "panchayat", "laxmikanth", "civics", "governance"
     ],
     history: [
         "history", "itihas", "modern", "ancient", "medieval", "gandhi", "freedom struggle", "mughal", 
-        "harappa", "maurya", "spectrum", "bipin chandra", "national movement", "independence"
+        "harappa", "maurya", "spectrum", "bipin chandra", "national movement", "independence", "itihasa"
     ],
     geography: [
         "geography", "bhugol", "mapping", "river", "mountain", "climate", "soil", "agriculture", 
-        "monsoon", "ocean", "continent", "atlas", "gc leong", "ncert geography"
+        "monsoon", "ocean", "continent", "atlas", "gc leong", "ncert geography", "krishi"
     ],
     economy: [
         "economy", "arthvyavastha", "budget", "gdp", "inflation", "banking", "rbi", "taxation", 
-        "gst", "finance", "mrunal", "ramesh singh", "economic survey"
+        "gst", "finance", "mrunal", "ramesh singh", "economic survey", "arthik"
     ],
     science: [
         "science", "vigyan", "biology", "physics", "chemistry", "technology", "space", "health", 
-        "disease", "isro", "it", "biotech"
+        "disease", "isro", "it", "biotech", "tech"
     ],
     environment: [
         "environment", "paryavaran", "ecology", "biodiversity", "climate change", "pollution", 
-        "national park", "shankar ias", "wildlife"
+        "national park", "shankar ias", "wildlife", "van"
     ],
     current: [
-        "current affairs", "samayiki", "news", "weekly", "monthly", "newspaper", "current", "pt 365"
+        "current affairs", "samayiki", "news", "weekly", "monthly", "newspaper", "current", "pt 365", "magazine"
     ]
 };
 
@@ -52,6 +53,12 @@ export const BookRecommendations: React.FC<BookRecommendationsProps> = ({ topic,
 
     useEffect(() => {
         const fetchRecommendedBooks = async () => {
+            const rawTopic = (topic || title || description || '').trim();
+            if (!rawTopic) {
+                setBooks([]);
+                return;
+            }
+
             setLoading(true);
             try {
                 const allBooks: FileData[] = [];
@@ -66,7 +73,7 @@ export const BookRecommendations: React.FC<BookRecommendationsProps> = ({ topic,
                     const q = query(filesRef, where('type', '==', 'book'));
                     const filesSnap = await getDocs(q);
                     filesSnap.forEach(doc => {
-                        allBooks.push({ id: doc.id, ...doc.data() } as FileData);
+                        allBooks.push({ id: doc.id, categoryId: folderDoc.id, ...doc.data() } as unknown as FileData);
                     });
                 });
                 
@@ -81,7 +88,7 @@ export const BookRecommendations: React.FC<BookRecommendationsProps> = ({ topic,
                 const getTerms = (str: string) => {
                     return str
                         .toLowerCase()
-                        .replace(/[^\w\s\u0900-\u097F]/g, ' ') // support Hindi letters too
+                        .replace(/[^\w\s\u0900-\u097F]/g, ' ') // support Hindi letters
                         .split(/\s+/)
                         .filter(w => w.length > 1);
                 };
@@ -98,68 +105,73 @@ export const BookRecommendations: React.FC<BookRecommendationsProps> = ({ topic,
                 const titleTerms = getTerms(searchTitle);
                 const descTerms = getTerms(searchDesc);
 
-                // Score each book on matching relevance
+                // Combine text terms and subject relation keywords for rich semantic coverage
+                const allIdentifiedTags = Array.from(
+                    new Set([...topicsList, ...topicTerms, ...titleTerms, ...descTerms])
+                ).filter(t => t.length > 1);
+
+                // Score each book STRICTLY on tag match with the identified topic
                 const scoredBooks = allBooks.map(book => {
                     let score = 0;
-                    const tags = (book.topicTags || []).map(t => t.toLowerCase().trim());
+                    let hasTagMatch = false;
+                    const bookTags = (book.topicTags || []).map(t => t.toLowerCase().trim()).filter(Boolean);
                     
-                    for (const tag of tags) {
-                        for (const cleanTopic of topicsList) {
-                            if (tag === cleanTopic) {
-                                score += 15;
-                            } else if (cleanTopic.includes(tag) || tag.includes(cleanTopic)) {
-                                score += 8;
+                    // Match against book's explicit topic tags
+                    for (const tag of bookTags) {
+                        // Direct match with AI identified tags or topic terms
+                        for (const idTag of allIdentifiedTags) {
+                            if (tag === idTag) {
+                                score += 20;
+                                hasTagMatch = true;
+                            } else if (tag.includes(idTag) || idTag.includes(tag)) {
+                                score += 12;
+                                hasTagMatch = true;
                             }
                         }
 
-                        if (topicTerms.includes(tag)) score += 6;
-                        if (titleTerms.includes(tag)) score += 4;
-                        if (descTerms.includes(tag)) score += 2;
-                        if (searchTitle.includes(tag)) score += 2;
-
+                        // Subject category mapping
                         Object.entries(RELATION_MAPS).forEach(([_category, terms]) => {
                             const tagInCat = terms.some(term => term === tag || term.includes(tag) || tag.includes(term));
                             if (tagInCat) {
-                                const searchInCat = topicsList.some(cleanTopic => 
-                                    terms.some(term => term === cleanTopic || term.includes(cleanTopic) || cleanTopic.includes(term))
-                                ) || topicTerms.some(term => 
-                                    terms.some(t => t === term || t.includes(term) || term.includes(t))
-                                ) || titleTerms.some(term => 
-                                    terms.some(t => t === term || t.includes(term) || term.includes(t))
+                                const searchInCat = allIdentifiedTags.some(idTag => 
+                                    terms.some(term => term === idTag || term.includes(idTag) || idTag.includes(term))
                                 );
-
                                 if (searchInCat) {
-                                    score += 10;
+                                    score += 15;
+                                    hasTagMatch = true;
                                 }
                             }
                         });
                     }
 
-                    // Also match title & description words directly
+                    // Also check if book name or category name explicitly contains the identified tags
                     const bookNameLower = (book.name || '').toLowerCase();
-                    topicTerms.forEach(t => { if (bookNameLower.includes(t)) score += 5; });
-                    titleTerms.forEach(t => { if (bookNameLower.includes(t)) score += 4; });
+                    const bookDescLower = (book.description || '').toLowerCase();
+                    for (const idTag of allIdentifiedTags) {
+                        if (bookNameLower.includes(idTag) && idTag.length > 2) {
+                            score += 8;
+                            hasTagMatch = true;
+                        }
+                        if (bookDescLower.includes(idTag) && idTag.length > 3) {
+                            score += 4;
+                            hasTagMatch = true;
+                        }
+                    }
 
-                    return { book, score };
+                    return { book, score, hasTagMatch };
                 });
 
-                // Sort by highest score
-                let matched = scoredBooks
-                    .filter(item => item.score > 0)
+                // STRICT FILTERING: Only include books that genuinely match the topic's tags (hasTagMatch && score > 0)
+                const matched = scoredBooks
+                    .filter(item => item.hasTagMatch && item.score > 0)
                     .sort((a, b) => b.score - a.score)
                     .map(item => item.book);
 
-                // If no exact match found, fall back to showing top available books
-                if (matched.length === 0) {
-                    matched = allBooks.slice(0, 4);
-                } else if (matched.length < 4) {
-                    const remaining = allBooks.filter(b => !matched.some(m => m.id === b.id));
-                    matched = [...matched, ...remaining].slice(0, 4);
-                }
-
-                setBooks(matched.slice(0, 4));
+                // Set ONLY strictly matched books (no fallback to unrelated books)
+                setBooks(matched.slice(0, 6));
             } catch (err) {
                 console.error("Error fetching recommended books:", err);
+                setBooks([]);
             } finally {
                 setLoading(false);
             }

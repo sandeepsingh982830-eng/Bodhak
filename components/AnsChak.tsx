@@ -62,8 +62,7 @@ const AnsChak: React.FC<AnsChakProps> = () => {
                     reader.readAsDataURL(file);
                 });
                 const text = await extractTextFromImage(base64Str, file.type);
-                const cleanedText = await cleanTranscribedText(text);
-                if (cleanedText) extractedTexts.push(cleanedText);
+                if (text && text.trim()) extractedTexts.push(text.trim());
             }
             const joinedText = extractedTexts.join('\n\n');
             setAnswerText(prev => prev ? prev + '\n\n' + joinedText : joinedText);
@@ -88,8 +87,7 @@ const AnsChak: React.FC<AnsChakProps> = () => {
             
             if (isTextFile) {
                 const text = await file.blob.text();
-                const cleanedText = await cleanTranscribedText(text);
-                setAnswerText(prev => prev ? prev + '\n\n' + cleanedText : cleanedText);
+                if (text && text.trim()) setAnswerText(prev => prev ? prev + '\n\n' + text.trim() : text.trim());
             } else {
                 const base64Str = await new Promise<string>((resolve, reject) => {
                     const reader = new FileReader();
@@ -98,8 +96,7 @@ const AnsChak: React.FC<AnsChakProps> = () => {
                     reader.readAsDataURL(file.blob);
                 });
                 const text = await extractTextFromImage(base64Str, file.mimeType);
-                const cleanedText = await cleanTranscribedText(text);
-                setAnswerText(prev => prev ? prev + '\n\n' + cleanedText : cleanedText);
+                if (text && text.trim()) setAnswerText(prev => prev ? prev + '\n\n' + text.trim() : text.trim());
             }
             setStatusText('');
         } catch (error) {
