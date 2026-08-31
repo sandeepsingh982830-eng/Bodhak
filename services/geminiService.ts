@@ -61,7 +61,8 @@ const callGeminiAPI = async (action: string, payload: any) => {
 const ai = {
     models: {
         generateContent: async (args: any, category?: string) => {
-            const payload = category ? { ...args, category } : args;
+            const finalCategory = category || args?.category || args?.task || 'other';
+            const payload = { ...args, category: finalCategory };
             return await callGeminiAPI("generate-content", payload);
         }
     }

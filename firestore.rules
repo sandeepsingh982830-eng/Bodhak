@@ -47,6 +47,11 @@ service cloud.firestore {
       allow write: if isManager();
     }
 
+    match /system_config/{configId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+
     // --- App Ratings ---
     match /appRatings/{ratingId} {
       allow read: if true;

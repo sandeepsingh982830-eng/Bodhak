@@ -17,12 +17,14 @@ import {
     Bell,
     Loader2,
     Coins,
-    Star
+    Star,
+    Key
 } from 'lucide-react';
 import { collection, getDocs, doc, updateDoc, serverTimestamp, getDoc, setDoc, onSnapshot, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeForFirestore } from '../services/firebase';
 import { UserProfile, useAuth } from '../hooks/useAuth';
 import ManagerChatPortal from './ManagerChatPortal';
+import ManagerGeminiKeys from './ManagerGeminiKeys';
 
 import { logCoinTransaction } from '../services/storageService';
 
@@ -470,7 +472,7 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({ onBack }) => {
     const [feedbackError, setFeedbackError] = useState<string | null>(null);
     const [feedbackSuccess, setFeedbackSuccess] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState<string | null>(null); // UID of user whose action is performing
-    const [activeTab, setActiveTab] = useState<'accounts' | 'support_chat' | 'payment_requests' | 'broadcast' | 'ratings' | 'settings'>('accounts');
+    const [activeTab, setActiveTab] = useState<'accounts' | 'support_chat' | 'payment_requests' | 'broadcast' | 'ratings' | 'settings' | 'gemini_keys'>('accounts');
 
     // Listen for custom tab switch events from manager pop-up notifications
     useEffect(() => {
@@ -1446,6 +1448,17 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({ onBack }) => {
                     <span>APP RATINGS ⭐</span>
                 </button>
                 <button
+                    onClick={() => setActiveTab('gemini_keys')}
+                    className={`flex-grow py-2.5 px-3 text-[10px] md:text-xs font-black rounded-xl transition duration-200 flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
+                        activeTab === 'gemini_keys' 
+                            ? 'bg-white text-indigo-650 shadow-sm border border-slate-200/20' 
+                            : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                >
+                    <Key className="w-4 h-4 text-indigo-600" />
+                    <span>GEMINI API KEYS 🔑</span>
+                </button>
+                <button
                     onClick={() => setActiveTab('settings')}
                     className={`flex-grow py-2.5 px-3 text-[10px] md:text-xs font-black rounded-xl transition duration-200 flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
                         activeTab === 'settings' 
@@ -2378,6 +2391,8 @@ export const ManagerPortal: React.FC<ManagerPortalProps> = ({ onBack }) => {
                         </button>
                     </form>
                 </div>
+            ) : activeTab === 'gemini_keys' ? (
+                <ManagerGeminiKeys />
             ) : (
                 <>
             {/* Stat Blocks */}

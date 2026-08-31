@@ -141,5 +141,22 @@ export interface CoinTransaction {
     timestamp: number;
 }
 
+export type GeminiWorkType = 'all' | 'quiz' | 'notes' | 'ans_chak' | 'ca' | 'pyq' | 'chat' | 'ocr';
+
+export interface GeminiKeyConfig {
+    id: string;
+    key: string;
+    label: string;
+    workType: GeminiWorkType;
+    isActive: boolean;
+    createdAt: number;
+    lastUsedAt?: number;
+    usageCount?: number;
+    status?: 'active' | 'quota_exhausted' | 'invalid' | 'unknown';
+    lastTestedAt?: number;
+    lastTestStatus?: 'valid' | 'invalid' | 'quota_exceeded';
+    lastTestMessage?: string;
+}
+
 export type AppStep = 'home' | 'create' | 'quiz' | 'result' | 'history' | 'loading' | 'notes' | 'ans-chak' | 'pyq' | 'current-affairs' | 'current-affairs-hindu' | 'manager' | 'buy-m' | 'free-m';
 

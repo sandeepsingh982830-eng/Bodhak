@@ -9,18 +9,56 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-export type CategoryType = 'quiz' | 'notes' | 'ans_chak' | 'ca' | 'pyq' | 'other';
+export type CategoryType = 'quiz' | 'notes' | 'ans_chak' | 'ca' | 'pyq' | 'chat' | 'ocr' | 'other';
+
+export interface GeminiKeyRecord {
+    id: string;
+    key: string;
+    label: string;
+    workType: 'all' | 'quiz' | 'notes' | 'ans_chak' | 'ca' | 'pyq' | 'chat' | 'ocr';
+    isActive: boolean;
+    createdAt: number;
+    lastUsedAt?: number;
+    usageCount?: number;
+    status?: 'active' | 'quota_exhausted' | 'invalid' | 'unknown';
+}
+
+const GEMINI_KEYS_CONFIG_FILE = path.join(process.cwd(), 'gemini_keys_config.json');
+
+const loadManagerKeysFromFile = (): GeminiKeyRecord[] => {
+    try {
+        if (fs.existsSync(GEMINI_KEYS_CONFIG_FILE)) {
+            const raw = fs.readFileSync(GEMINI_KEYS_CONFIG_FILE, 'utf-8');
+            const data = JSON.parse(raw);
+            if (Array.isArray(data)) {
+                return data;
+            }
+        }
+    } catch (e) {
+        console.warn("[Gemini Keys] Error loading keys from file:", e);
+    }
+    return [];
+};
+
+const saveManagerKeysToFile = (keys: GeminiKeyRecord[]) => {
+    try {
+        fs.writeFileSync(GEMINI_KEYS_CONFIG_FILE, JSON.stringify(keys, null, 2), 'utf-8');
+    } catch (e) {
+        console.warn("[Gemini Keys] Error saving keys to file:", e);
+    }
+};
+
+// In-memory manager keys storage
+let managerGeminiKeys: GeminiKeyRecord[] = loadManagerKeysFromFile();
 
 // Helper to gather all valid Gemini API keys from environment
-const getActiveGeminiKeys = (): string[] => {
+const getActiveEnvGeminiKeys = (): string[] => {
     const keys: string[] = [];
 
     const addKey = (k?: string) => {
         if (!k) return;
         const trimmed = k.trim();
-        if (trimmed && trimmed.startsWith('AIza') && !keys.includes(trimmed)) {
-            keys.push(trimmed);
-        } else if (trimmed && trimmed.length > 20 && !trimmed.startsWith('gsk_') && !trimmed.startsWith('cohere_') && !trimmed.startsWith('sk-') && !keys.includes(trimmed)) {
+        if (trimmed && (trimmed.startsWith('AIza') || trimmed.length > 20) && !trimmed.startsWith('gsk_') && !trimmed.startsWith('cohere_') && !trimmed.startsWith('sk-') && !keys.includes(trimmed)) {
             keys.push(trimmed);
         }
     };
@@ -38,47 +76,90 @@ const getActiveGeminiKeys = (): string[] => {
     return keys;
 };
 
-// Global pool of working Gemini keys
-let activeGeminiPool: string[] = getActiveGeminiKeys();
-let poolIndex = 0;
 const invalidKeys = new Set<string>();
+const categoryIndices: Record<string, number> = {};
 
-function getNextGeminiClient(): { ai: GoogleGenAI; key: string } {
-    // Refresh pool from env dynamically if needed
-    const currentEnvKeys = getActiveGeminiKeys();
-    for (const k of currentEnvKeys) {
-        if (!invalidKeys.has(k) && !activeGeminiPool.includes(k)) {
-            activeGeminiPool.push(k);
+/**
+ * Gets candidate Gemini keys for a specific category/work type with intelligent fallback:
+ * 1. Category-specific Manager keys (e.g. 'quiz', 'ca', 'notes', 'ans_chak', 'pyq')
+ * 2. 'All Work' / Global Manager keys
+ * 3. Environment variable keys (process.env.GEMINI_API_KEY, etc.)
+ */
+function getCandidateKeysForCategory(category: CategoryType = 'other'): Array<{ key: string; source: string; record?: GeminiKeyRecord }> {
+    const candidates: Array<{ key: string; source: string; record?: GeminiKeyRecord }> = [];
+    const seenKeys = new Set<string>();
+
+    const addCandidate = (k: string, src: string, record?: GeminiKeyRecord) => {
+        const clean = k.trim();
+        if (!clean || invalidKeys.has(clean) || seenKeys.has(clean)) return;
+        seenKeys.add(clean);
+        candidates.push({ key: clean, source: src, record });
+    };
+
+    // 1. Specific workType Manager keys
+    if (category !== 'other') {
+        const specificManagerKeys = managerGeminiKeys.filter(k => k.isActive && k.workType === category);
+        for (const k of specificManagerKeys) {
+            addCandidate(k.key, `Manager (${category})`, k);
         }
     }
 
-    // Filter out known invalid keys
-    const workingPool = activeGeminiPool.filter(k => !invalidKeys.has(k));
+    // 2. Global / 'all' workType Manager keys
+    const globalManagerKeys = managerGeminiKeys.filter(k => k.isActive && (k.workType === 'all' || !k.workType));
+    for (const k of globalManagerKeys) {
+        addCandidate(k.key, 'Manager (All Work)', k);
+    }
+
+    // 3. Environment keys
+    const envKeys = getActiveEnvGeminiKeys();
+    for (const k of envKeys) {
+        addCandidate(k, 'Environment Variable');
+    }
+
+    return candidates;
+}
+
+function getNextGeminiClient(category: CategoryType = 'other'): { ai: GoogleGenAI; key: string; candidate: { key: string; source: string; record?: GeminiKeyRecord } } {
+    const candidates = getCandidateKeysForCategory(category);
     
-    if (workingPool.length === 0) {
-        // If all filtered out but env exists, try primary again
-        const primary = process.env.GEMINI_API_KEY?.trim();
-        if (primary) {
-            return {
-                ai: new GoogleGenAI({
-                    apiKey: primary,
-                    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-                }),
-                key: primary
-            };
+    if (candidates.length === 0) {
+        // Check if any keys are configured in manager or env even if disabled/invalid
+        const totalConfigured = managerGeminiKeys.length + getActiveEnvGeminiKeys().length;
+        if (totalConfigured === 0) {
+            throw new Error("No Gemini API key configured. Please add your Gemini API Key in Manager Portal > 'GEMINI API KEYS' (मैनेजर पोर्टल में जाकर अपनी API Key जोड़ें).");
         }
-        throw new Error("No valid Gemini API key configured in environment.");
+        
+        // If all filtered out as invalid, try resetting invalid pool once
+        if (invalidKeys.size > 0 && totalConfigured > 0) {
+            console.warn("[Gemini Auth] Resetting invalid keys filter to re-attempt configured keys...");
+            invalidKeys.clear();
+            const recheck = getCandidateKeysForCategory(category);
+            if (recheck.length > 0) {
+                return {
+                    ai: new GoogleGenAI({ apiKey: recheck[0].key, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } }),
+                    key: recheck[0].key,
+                    candidate: recheck[0]
+                };
+            }
+        }
+
+        throw new Error("All configured Gemini API keys are currently rate-limited or invalid. Please add a fresh API key in Manager Portal > 'GEMINI API KEYS'.");
     }
 
-    poolIndex = poolIndex % workingPool.length;
-    const apiKey = workingPool[poolIndex];
+    const catKey = category || 'other';
+    const currentIndex = categoryIndices[catKey] || 0;
+    const selectedIndex = currentIndex % candidates.length;
+    categoryIndices[catKey] = selectedIndex + 1;
+
+    const candidate = candidates[selectedIndex];
 
     return {
         ai: new GoogleGenAI({
-            apiKey,
+            apiKey: candidate.key,
             httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
         }),
-        key: apiKey
+        key: candidate.key,
+        candidate
     };
 }
 
@@ -87,10 +168,10 @@ function getNextGeminiClient(): { ai: GoogleGenAI; key: string } {
  */
 async function callGeminiWithRotation<T>(
     operation: (ai: GoogleGenAI, attemptModel?: string) => Promise<T>,
-    _category: CategoryType = 'other'
+    category: CategoryType = 'other'
 ): Promise<T> {
-    const workingPool = activeGeminiPool.filter(k => !invalidKeys.has(k));
-    const totalKeys = Math.max(workingPool.length, 1);
+    const candidates = getCandidateKeysForCategory(category);
+    const totalKeys = Math.max(candidates.length, 1);
     const maxAttempts = Math.min(Math.max(totalKeys * 3, 4), 12);
     let attempts = 0;
 
@@ -99,41 +180,52 @@ async function callGeminiWithRotation<T>(
 
     while (attempts < maxAttempts) {
         attempts++;
-        const { ai, key } = getNextGeminiClient();
+        const { ai, key, candidate } = getNextGeminiClient(category);
         const currentModel = attempts > 1 ? fallbackModels[attempts % fallbackModels.length] : undefined;
 
         try {
-            return await operation(ai, currentModel);
+            const result = await operation(ai, currentModel);
+            
+            // Mark usage if it's a manager key
+            if (candidate.record) {
+                candidate.record.lastUsedAt = Date.now();
+                candidate.record.usageCount = (candidate.record.usageCount || 0) + 1;
+                candidate.record.status = 'active';
+            }
+
+            return result;
         } catch (error: any) {
             const errorMsg = (error?.message || '').toLowerCase();
             const isInvalidKey = errorMsg.includes('api key not valid') || errorMsg.includes('api_key_invalid') || error?.status === 'INVALID_ARGUMENT';
             const isQuotaOrRateLimit = errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('resource_exhausted') || errorMsg.includes('too many requests');
 
             if (isInvalidKey) {
-                console.warn(`[Gemini Auth] Pruning permanently invalid API key: ${key.substring(0, 8)}...`);
+                console.warn(`[Gemini Auth] Pruning invalid API key from ${candidate.source}: ${key.substring(0, 8)}...`);
                 invalidKeys.add(key);
-                activeGeminiPool = activeGeminiPool.filter(k => k !== key);
-                // Try next key immediately without delay
+                if (candidate.record) {
+                    candidate.record.status = 'invalid';
+                    saveManagerKeysToFile(managerGeminiKeys);
+                }
                 continue;
             }
 
             if (isQuotaOrRateLimit) {
-                console.warn(`[Gemini Rate Limit 429] Key reached quota limit (Attempt ${attempts}/${maxAttempts}). Rotating key and trying fallback model...`);
-                poolIndex = (poolIndex + 1);
+                console.warn(`[Gemini Rate Limit 429] Key from ${candidate.source} reached quota (Attempt ${attempts}/${maxAttempts}). Rotating key & trying fallback model...`);
+                if (candidate.record) {
+                    candidate.record.status = 'quota_exhausted';
+                }
                 
-                // Exponential / stepped backoff before retrying
-                const delayMs = Math.min(800 * attempts, 3000);
+                const delayMs = Math.min(600 * attempts, 2500);
                 await new Promise(resolve => setTimeout(resolve, delayMs));
                 continue;
             }
 
             // For other transient errors, rotate and brief delay
-            poolIndex = (poolIndex + 1);
-            await new Promise(resolve => setTimeout(resolve, 400));
+            await new Promise(resolve => setTimeout(resolve, 350));
         }
     }
 
-    throw new Error("AI service is currently busy handling high volume. Please wait a few moments and retry.");
+    throw new Error("AI service is currently busy handling high volume or keys have reached quota limit. Please try again in a moment or add another Gemini Key in Manager Portal.");
 }
 
 app.use(express.json({ limit: '100mb' }));
@@ -534,6 +626,135 @@ app.post("/api/gemini/:action", async (req, res) => {
     }
 });
 
+
+// Manager Gemini API Keys Management Endpoints
+app.get("/api/manager/gemini-keys", (req, res) => {
+    try {
+        const envCount = getActiveEnvGeminiKeys().length;
+        const totalActive = managerGeminiKeys.filter(k => k.isActive).length + envCount;
+        
+        res.json({
+            keys: managerGeminiKeys,
+            stats: {
+                totalKeys: managerGeminiKeys.length,
+                activeManagerKeys: managerGeminiKeys.filter(k => k.isActive).length,
+                envKeysCount: envCount,
+                totalWorking: totalActive,
+                invalidCount: invalidKeys.size
+            }
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to load keys" });
+    }
+});
+
+app.post("/api/manager/gemini-keys", (req, res) => {
+    try {
+        const { keys } = req.body;
+        if (!Array.isArray(keys)) {
+            return res.status(400).json({ error: "Expected an array of keys" });
+        }
+
+        // Validate and sanitize keys
+        const sanitized: GeminiKeyRecord[] = keys.map((item: any) => ({
+            id: item.id || `key_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+            key: (item.key || '').trim(),
+            label: (item.label || 'Gemini Key').trim(),
+            workType: item.workType || 'all',
+            isActive: item.isActive !== false,
+            createdAt: item.createdAt || Date.now(),
+            lastUsedAt: item.lastUsedAt || undefined,
+            usageCount: item.usageCount || 0,
+            status: item.status || 'active'
+        })).filter(k => k.key.length > 10);
+
+        // Clear invalid status for any revived/updated active keys
+        for (const k of sanitized) {
+            if (k.isActive && invalidKeys.has(k.key)) {
+                invalidKeys.delete(k.key);
+            }
+        }
+
+        managerGeminiKeys = sanitized;
+        saveManagerKeysToFile(managerGeminiKeys);
+
+        console.log(`[Gemini Keys] Successfully updated ${sanitized.length} manager Gemini keys.`);
+        return res.json({ success: true, count: sanitized.length, keys: sanitized });
+    } catch (error: any) {
+        console.error("Error saving manager Gemini keys:", error);
+        res.status(500).json({ error: error.message || "Failed to save keys" });
+    }
+});
+
+app.delete("/api/manager/gemini-keys/:id", (req, res) => {
+    try {
+        const { id } = req.params;
+        const keyRecord = managerGeminiKeys.find(k => k.id === id);
+        if (keyRecord) {
+            invalidKeys.delete(keyRecord.key);
+        }
+        managerGeminiKeys = managerGeminiKeys.filter(k => k.id !== id);
+        saveManagerKeysToFile(managerGeminiKeys);
+        return res.json({ success: true, count: managerGeminiKeys.length });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || "Failed to delete key" });
+    }
+});
+
+app.post("/api/manager/gemini-keys/test", async (req, res) => {
+    const { key, model } = req.body;
+    if (!key || typeof key !== 'string') {
+        return res.status(400).json({ success: false, error: "API key string is required for testing" });
+    }
+
+    const trimmedKey = key.trim();
+    const startTime = Date.now();
+    const testModel = model || "gemini-3.7-flash";
+
+    try {
+        const testClient = new GoogleGenAI({
+            apiKey: trimmedKey,
+            httpOptions: { headers: { 'User-Agent': 'aistudio-build-test' } }
+        });
+
+        const testResponse = await testClient.models.generateContent({
+            model: testModel,
+            contents: "Hi! Reply with exactly the word 'READY' to verify connection.",
+            config: {
+                maxOutputTokens: 10,
+                temperature: 0.1
+            }
+        });
+
+        const latencyMs = Date.now() - startTime;
+        const reply = (testResponse.text || '').trim();
+
+        // If key was in invalid set, remove it since it just succeeded
+        invalidKeys.delete(trimmedKey);
+
+        return res.json({
+            success: true,
+            valid: true,
+            latencyMs,
+            model: testModel,
+            responsePreview: reply
+        });
+    } catch (error: any) {
+        const latencyMs = Date.now() - startTime;
+        const errorMsg = error?.message || "Unknown error";
+        const isQuota = errorMsg.toLowerCase().includes('429') || errorMsg.toLowerCase().includes('quota') || errorMsg.toLowerCase().includes('resource_exhausted');
+        const isInvalid = errorMsg.toLowerCase().includes('api key not valid') || errorMsg.toLowerCase().includes('invalid_argument');
+
+        return res.json({
+            success: false,
+            valid: false,
+            latencyMs,
+            isQuota,
+            isInvalid,
+            error: errorMsg
+        });
+    }
+});
 
 function getProjectGeminiClient() {
     try {
