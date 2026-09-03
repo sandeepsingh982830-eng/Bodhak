@@ -53,6 +53,7 @@ export interface AppTranslations {
     pyqTitle: string;
     buyM: string;
     freeM: string;
+    antiSleepAlarm: string;
 }
 
 export const translations: Record<Language, AppTranslations> = {
@@ -108,7 +109,8 @@ export const translations: Record<Language, AppTranslations> = {
         notesTitle: "Smart Notes / नोट्स 📚",
         pyqTitle: "PYQ Scanner / पिछले वर्ष के प्रश्न 🔍",
         buyM: "Buy Materials",
-        freeM: "Free Materials"
+        freeM: "Free Materials",
+        antiSleepAlarm: "Anti-Sleep Alarm 👁️"
     },
     hi: {
         appName: "बोधक (Bodhak)",
@@ -162,6 +164,7 @@ export const translations: Record<Language, AppTranslations> = {
         notesTitle: "Smart Notes / नोट्स 📚",
         pyqTitle: "PYQ Scanner / पिछले वर्ष के प्रश्न 🔍",
         buyM: "स्टडी मटेरियल खरीदें",
-        freeM: "फ्री मटेरियल"
+        freeM: "फ्री मटेरियल",
+        antiSleepAlarm: "एंटी-स्लीप अलार्म 👁️"
     }
 };

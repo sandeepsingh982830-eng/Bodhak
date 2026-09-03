@@ -542,7 +542,7 @@ export const NoteTemplateRenderer: React.FC<NoteTemplateRendererProps> = ({
     onSelectTemplate
 }) => {
     const { config, content, handwrittenImageUrl, createdAt } = note;
-    const template = activeTemplate || config.template || 'infographic';
+    const template = config.template || activeTemplate || 'infographic';
 
     const parsedData = useMemo(() => {
         return parseNoteContent(content, config.subject, config.topic);

@@ -20,6 +20,7 @@ import ManagerPortal from './components/ManagerPortal';
 import AuthScreen from './components/AuthScreen';
 import { BuyMaterial } from './components/BuyMaterial';
 import { FreeMaterial } from './components/FreeMaterial';
+import AntiSleepAlarm, { AntiSleepAlarmHandle } from './components/AntiSleepAlarm';
 import HomeDashboard from './components/HomeDashboard';
 import { db } from './services/firebase';
 import { collection, query, orderBy, limit, onSnapshot, doc } from 'firebase/firestore';
@@ -127,6 +128,53 @@ const App: React.FC = () => {
     const timerRef = useRef<number | null>(null);
     const startTimeRef = useRef<number>(0);
     const sessionExclusions = useRef<Record<string, string[]>>({});
+
+    // Anti-Sleep Alarm PiP Shortcut state & ref
+    const antiSleepRef = useRef<AntiSleepAlarmHandle>(null);
+    const [isAntiSleepActive, setIsAntiSleepActive] = useState(false);
+    const [isPiPActive, setIsPiPActive] = useState(false);
+    const [antiSleepToast, setAntiSleepToast] = useState<string | null>(null);
+
+    // Double-click Bodhak logo shortcut: directly launch Anti-Sleep Alarm in PiP window
+    const handleLogoDoubleClick = async () => {
+        try {
+            // Play subtle activation chime
+            try {
+                const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+                if (AudioContext) {
+                    const ctx = new AudioContext();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(659.25, ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+                    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start();
+                    osc.stop(ctx.currentTime + 0.35);
+                }
+            } catch {}
+
+            setAntiSleepToast("🚀 Anti-Sleep Alarm PiP Window शुरू हो रहा है... 👁️📺");
+
+            if (antiSleepRef.current) {
+                await antiSleepRef.current.startPiPTracking();
+                setAntiSleepToast("✅ Anti-Sleep Alarm PiP Window चालू है! 👁️📺");
+            } else {
+                window.dispatchEvent(new CustomEvent('bodhak:start_anti_sleep_pip'));
+                setAntiSleepToast("✅ Anti-Sleep Alarm PiP Window चालू है! 👁️📺");
+            }
+        } catch (e) {
+            console.warn('PiP Shortcut error:', e);
+            setStep('anti-sleep');
+        }
+
+        setTimeout(() => {
+            setAntiSleepToast(null);
+        }, 3500);
+    };
 
     useEffect(() => {
         const fetchHistory = async () => {
@@ -515,6 +563,9 @@ const App: React.FC = () => {
             case 'ans-chak': return t.ansChak;
             case 'pyq': return t.pyqScanner;
             case 'current-affairs': return t.currentAffairs;
+            case 'anti-sleep': return t.antiSleepAlarm;
+            case 'buy-m': return t.buyM;
+            case 'free-m': return t.freeM;
             case 'manager': return t.managerPortal;
             default: return 'Bodhak';
         }
@@ -546,11 +597,39 @@ const App: React.FC = () => {
             title={getTitle()}
             onBack={step === 'quiz' || step === 'result' ? reset : (step !== 'home' ? () => setStep('home') : undefined)}
             onProfileClick={() => setIsProfileOpen(true)}
+            onLogoDoubleClick={handleLogoDoubleClick}
             onNavigate={(s) => {
                 setStep(s);
             }}
         >
             <ProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
+
+            {/* Active Floating Pill when Anti-Sleep / PiP is running while student navigates other screens */}
+            {isAntiSleepActive && step !== 'anti-sleep' && (
+                <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-slate-900/95 text-white border border-cyan-500/50 px-3.5 py-1.5 rounded-full shadow-2xl backdrop-blur-md text-xs animate-in fade-in slide-in-from-top-3">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span className="font-bold text-cyan-300">👁️ Anti-Sleep {isPiPActive ? 'PiP Active 📺' : 'Active'}</span>
+                    <button 
+                        onClick={() => setStep('anti-sleep')} 
+                        className="ml-1 px-2.5 py-0.5 rounded-full bg-cyan-600 hover:bg-cyan-500 text-white font-black text-[11px] transition cursor-pointer"
+                    >
+                        कैमरा देखें
+                    </button>
+                    <button 
+                        onClick={() => antiSleepRef.current?.stopTracking()} 
+                        className="px-2 py-0.5 rounded-full bg-slate-800 hover:bg-red-900/80 text-slate-300 hover:text-red-200 text-[11px] font-bold transition cursor-pointer"
+                    >
+                        अलार्म बंद करें
+                    </button>
+                </div>
+            )}
+
+            {/* Shortcut Toast Notification */}
+            {antiSleepToast && (
+                <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2.5 bg-slate-900/95 text-white border border-cyan-500 px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-md text-xs md:text-sm font-black animate-in fade-in slide-in-from-bottom-3 pointer-events-none">
+                    <span>{antiSleepToast}</span>
+                </div>
+            )}
 
             {step === 'home' && (
                 <HomeDashboard 
@@ -577,6 +656,16 @@ const App: React.FC = () => {
                     profile={profile} 
                 />
             )}
+
+            {/* Anti-Sleep Alarm: Rendered persistently so PiP tracking continues while navigating other tabs */}
+            <div className={step === 'anti-sleep' ? 'h-full w-full' : (isAntiSleepActive ? 'fixed -top-[9999px] -left-[9999px] pointer-events-none opacity-0' : 'hidden')}>
+                <AntiSleepAlarm 
+                    ref={antiSleepRef}
+                    onBack={() => setStep('home')} 
+                    onTrackingChange={(tracking) => setIsAntiSleepActive(tracking)}
+                    onPiPChange={(pip) => setIsPiPActive(pip)}
+                />
+            </div>
 
             {step === 'create' && (
                 <div className="relative h-full text-slate-800">

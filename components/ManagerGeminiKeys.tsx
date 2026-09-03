@@ -145,9 +145,11 @@ export const ManagerGeminiKeys: React.FC<ManagerGeminiKeysProps> = () => {
                 }
             }));
             if (res.valid) {
-                showNotification('success', `Key is working! Response time: ${res.latencyMs}ms`);
+                const modelInfo = res.model ? ` (${res.model})` : '';
+                const noteInfo = res.note ? ` • ${res.note}` : '';
+                showNotification('success', `Key is working${modelInfo}! Response time: ${res.latencyMs}ms${noteInfo}`);
             } else {
-                showNotification('error', `Key test failed: ${res.error || 'Invalid Key'}`);
+                showNotification('error', `Key test: ${res.error || 'Test unverified'}`);
             }
         } catch (e: any) {
             setTestResults(prev => ({

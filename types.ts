@@ -158,5 +158,5 @@ export interface GeminiKeyConfig {
     lastTestMessage?: string;
 }
 
-export type AppStep = 'home' | 'create' | 'quiz' | 'result' | 'history' | 'loading' | 'notes' | 'ans-chak' | 'pyq' | 'current-affairs' | 'current-affairs-hindu' | 'manager' | 'buy-m' | 'free-m';
+export type AppStep = 'home' | 'create' | 'quiz' | 'result' | 'history' | 'loading' | 'notes' | 'ans-chak' | 'pyq' | 'current-affairs' | 'current-affairs-hindu' | 'manager' | 'buy-m' | 'free-m' | 'anti-sleep';
 

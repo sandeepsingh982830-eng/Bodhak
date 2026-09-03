@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Zap, History, LayoutGrid, FileText, CheckCircle, Check, FileSearch, User, Newspaper, Crown, X, Share2, Download, Coins, MessageSquare, Bell, Trash2, Home, MoreVertical, Globe, Settings, QrCode, Copy, Loader2, Lock, FolderOpen, ShoppingBag, BookOpen, Trophy, Sparkles, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Zap, History, LayoutGrid, FileText, CheckCircle, Check, FileSearch, User, Newspaper, Crown, X, Share2, Download, Coins, MessageSquare, Bell, Trash2, Home, MoreVertical, Globe, Settings, QrCode, Copy, Loader2, Lock, FolderOpen, ShoppingBag, BookOpen, Trophy, Sparkles, TrendingUp, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppStep } from '../types';
 import { useAuth } from '../hooks/useAuth';
@@ -15,20 +15,64 @@ interface LayoutProps {
     onBack?: () => void;
     onNavigate: (step: AppStep) => void;
     onProfileClick?: () => void;
+    onLogoDoubleClick?: () => void;
 }
 
-export const BodhakLogo = ({ onClick }: { onClick?: () => void }) => (
-  <div 
-    onClick={onClick}
-    className={`h-8 w-8 md:h-10 md:w-10 rounded-full flex items-center justify-center relative overflow-hidden shrink-0 ${onClick ? 'cursor-pointer active:scale-95 transition-transform' : ''}`}
-  >
-    <img 
-      src="/icon.svg" 
-      alt="Bodhak Logo" 
-      className="w-full h-full object-contain"
-    />
-  </div>
-);
+export const BodhakLogo = ({ 
+  onClick, 
+  onDoubleClick, 
+  title 
+}: { 
+  onClick?: () => void; 
+  onDoubleClick?: () => void; 
+  title?: string;
+}) => {
+  const lastClickRef = React.useRef<number>(0);
+  const clickTimerRef = React.useRef<any>(null);
+
+  const handleClick = (e: React.MouseEvent) => {
+    const now = Date.now();
+    const diff = now - lastClickRef.current;
+
+    // Fast double-tap or double-click detected (< 450ms)
+    if (diff > 0 && diff < 450) {
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
+      lastClickRef.current = 0;
+      if (onDoubleClick) {
+        onDoubleClick();
+        return;
+      }
+    }
+
+    lastClickRef.current = now;
+    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    clickTimerRef.current = setTimeout(() => {
+      if (onClick) onClick();
+      clickTimerRef.current = null;
+    }, 260);
+  };
+
+  return (
+    <div 
+      onClick={handleClick}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        if (onDoubleClick) onDoubleClick();
+      }}
+      title={title || 'Bodhak (Double-click: Anti-Sleep PiP 👁️📺)'}
+      className={`h-8 w-8 md:h-10 md:w-10 rounded-full flex items-center justify-center relative overflow-hidden shrink-0 select-none ${onClick || onDoubleClick ? 'cursor-pointer active:scale-95 transition-transform' : ''}`}
+    >
+      <img 
+        src="/icon.svg" 
+        alt="Bodhak Logo" 
+        className="w-full h-full object-contain pointer-events-none"
+      />
+    </div>
+  );
+};
 
 const playChime = () => {
     try {
@@ -63,7 +107,7 @@ const playChime = () => {
     }
 };
 
-const Layout: React.FC<LayoutProps> = ({ children, currentStep, title, onBack, onNavigate, onProfileClick }) => {
+const Layout: React.FC<LayoutProps> = ({ children, currentStep, title, onBack, onNavigate, onProfileClick, onLogoDoubleClick }) => {
     const { user, profile, updateProfile, streakRewardInfo, clearStreakReward } = useAuth();
     const [notifications, setNotifications] = useState<any[]>([]);
     const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -838,9 +882,17 @@ const Layout: React.FC<LayoutProps> = ({ children, currentStep, title, onBack, o
                                 <ArrowLeft className="h-5 w-5 md:h-6 md:w-6" />
                             </button>
                         )}
-                        {!showBack && <BodhakLogo onClick={() => onNavigate('home')} />}
+                        {!showBack && (
+                            <BodhakLogo 
+                                onClick={() => onNavigate('home')} 
+                                onDoubleClick={onLogoDoubleClick}
+                                title="Bodhak (Double-click: Anti-Sleep PiP 👁️📺)"
+                            />
+                        )}
                         <h1 
                             onClick={!showBack ? () => onNavigate('home') : undefined}
+                            onDoubleClick={!showBack ? onLogoDoubleClick : undefined}
+                            title={!showBack ? "Bodhak (Double-click: Anti-Sleep PiP 👁️📺)" : undefined}
                             className={`font-extrabold text-base md:text-xl truncate select-none text-slate-900 tracking-tight flex items-center ${!showBack ? 'cursor-pointer hover:text-indigo-655 transition-colors' : ''}`}
                         >
                             {title}
@@ -1087,6 +1139,17 @@ const Layout: React.FC<LayoutProps> = ({ children, currentStep, title, onBack, o
                                                 >
                                                     <BookOpen className="w-4 h-4 text-slate-400" />
                                                     <span>{t.freeM}</span>
+                                                </button>
+
+                                                <button
+                                                    onClick={() => {
+                                                        onNavigate('anti-sleep');
+                                                        setIsMenuOpen(false);
+                                                    }}
+                                                    className={`w-full px-3 py-2 text-xs font-bold rounded-xl text-left flex items-center gap-2 hover:bg-slate-50 transition active:scale-[0.98] ${currentStep === 'anti-sleep' ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-705'}`}
+                                                >
+                                                    <Eye className="w-4 h-4 text-cyan-500" />
+                                                    <span>{t.antiSleepAlarm}</span>
                                                 </button>
                                             </div>
 

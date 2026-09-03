@@ -198,6 +198,7 @@ async function callGeminiWithRotation<T>(
             const errorMsg = (error?.message || '').toLowerCase();
             const isInvalidKey = errorMsg.includes('api key not valid') || errorMsg.includes('api_key_invalid') || error?.status === 'INVALID_ARGUMENT';
             const isQuotaOrRateLimit = errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('resource_exhausted') || errorMsg.includes('too many requests');
+            const is503OrUnavailable = errorMsg.includes('503') || errorMsg.includes('unavailable') || errorMsg.includes('high demand') || error?.status === 'UNAVAILABLE';
 
             if (isInvalidKey) {
                 console.warn(`[Gemini Auth] Pruning invalid API key from ${candidate.source}: ${key.substring(0, 8)}...`);
@@ -206,6 +207,13 @@ async function callGeminiWithRotation<T>(
                     candidate.record.status = 'invalid';
                     saveManagerKeysToFile(managerGeminiKeys);
                 }
+                continue;
+            }
+
+            if (is503OrUnavailable) {
+                console.warn(`[Gemini 503 High Demand] Model experienced high demand / unavailable (Attempt ${attempts}/${maxAttempts}). Rotating to fallback model...`);
+                const delayMs = Math.min(400 * attempts, 1500);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
                 continue;
             }
 
@@ -225,7 +233,7 @@ async function callGeminiWithRotation<T>(
         }
     }
 
-    throw new Error("AI service is currently busy handling high volume or keys have reached quota limit. Please try again in a moment or add another Gemini Key in Manager Portal.");
+    throw new Error("AI service is currently busy handling high volume or models are in high demand (503). Please retry in a moment or add another Gemini Key in Manager Portal.");
 }
 
 app.use(express.json({ limit: '100mb' }));
@@ -709,7 +717,14 @@ app.post("/api/manager/gemini-keys/test", async (req, res) => {
 
     const trimmedKey = key.trim();
     const startTime = Date.now();
-    const testModel = model || "gemini-3.7-flash";
+    const testCandidateModels = [
+        model || "gemini-3.7-flash",
+        "gemini-2.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash-lite"
+    ];
+
+    let lastError: any = null;
 
     try {
         const testClient = new GoogleGenAI({
@@ -717,41 +732,92 @@ app.post("/api/manager/gemini-keys/test", async (req, res) => {
             httpOptions: { headers: { 'User-Agent': 'aistudio-build-test' } }
         });
 
-        const testResponse = await testClient.models.generateContent({
-            model: testModel,
-            contents: "Hi! Reply with exactly the word 'READY' to verify connection.",
-            config: {
-                maxOutputTokens: 10,
-                temperature: 0.1
+        for (const candidateModel of testCandidateModels) {
+            try {
+                const testResponse = await testClient.models.generateContent({
+                    model: candidateModel,
+                    contents: "Hi! Reply with exactly the word 'READY' to verify connection.",
+                    config: {
+                        maxOutputTokens: 10,
+                        temperature: 0.1
+                    }
+                });
+
+                const latencyMs = Date.now() - startTime;
+                const reply = (testResponse.text || '').trim();
+
+                // If key was in invalid set, remove it since it verified working!
+                invalidKeys.delete(trimmedKey);
+
+                return res.json({
+                    success: true,
+                    valid: true,
+                    latencyMs,
+                    model: candidateModel,
+                    responsePreview: reply,
+                    note: candidateModel !== testCandidateModels[0] 
+                        ? `Primary model was busy (503), verified successfully with fallback (${candidateModel})` 
+                        : undefined
+                });
+            } catch (err: any) {
+                lastError = err;
+                const errMsg = (err?.message || '').toLowerCase();
+                const isInvalid = errMsg.includes('api key not valid') || errMsg.includes('invalid_argument');
+                
+                // If it's a permanently invalid API key, no need to retry other models
+                if (isInvalid) {
+                    break;
+                }
+
+                // If it's a 503 (high demand) or 429 (quota), try next candidate model
+                console.log(`[Gemini Test] Model ${candidateModel} returned temporary error, trying next candidate model...`);
             }
-        });
+        }
 
+        // If all candidate models failed, report structured error
         const latencyMs = Date.now() - startTime;
-        const reply = (testResponse.text || '').trim();
+        let cleanErrorMsg = lastError?.message || "Unknown error";
+        
+        // Try parsing JSON error message if returned as JSON string
+        try {
+            if (typeof cleanErrorMsg === 'string' && cleanErrorMsg.includes('{')) {
+                const match = cleanErrorMsg.match(/\{[\s\S]*\}/);
+                if (match) {
+                    const parsed = JSON.parse(match[0]);
+                    if (parsed.error && parsed.error.message) {
+                        cleanErrorMsg = parsed.error.message;
+                    }
+                }
+            }
+        } catch (_) {}
 
-        // If key was in invalid set, remove it since it just succeeded
-        invalidKeys.delete(trimmedKey);
+        const isQuota = cleanErrorMsg.toLowerCase().includes('429') || cleanErrorMsg.toLowerCase().includes('quota') || cleanErrorMsg.toLowerCase().includes('resource_exhausted');
+        const is503 = cleanErrorMsg.toLowerCase().includes('503') || cleanErrorMsg.toLowerCase().includes('high demand') || cleanErrorMsg.toLowerCase().includes('unavailable');
+        const isInvalid = cleanErrorMsg.toLowerCase().includes('api key not valid') || cleanErrorMsg.toLowerCase().includes('invalid_argument');
 
-        return res.json({
-            success: true,
-            valid: true,
-            latencyMs,
-            model: testModel,
-            responsePreview: reply
-        });
-    } catch (error: any) {
-        const latencyMs = Date.now() - startTime;
-        const errorMsg = error?.message || "Unknown error";
-        const isQuota = errorMsg.toLowerCase().includes('429') || errorMsg.toLowerCase().includes('quota') || errorMsg.toLowerCase().includes('resource_exhausted');
-        const isInvalid = errorMsg.toLowerCase().includes('api key not valid') || errorMsg.toLowerCase().includes('invalid_argument');
+        let userFriendlyMsg = cleanErrorMsg;
+        if (is503) {
+            userFriendlyMsg = "Google Gemini models are temporarily experiencing high demand (503). Your key is valid but Google servers are busy.";
+        } else if (isQuota) {
+            userFriendlyMsg = "Quota limit reached (429 Rate Limit) for this key. Please wait or use another key.";
+        } else if (isInvalid) {
+            userFriendlyMsg = "Invalid API Key. Please check the key from Google AI Studio.";
+        }
 
         return res.json({
             success: false,
             valid: false,
             latencyMs,
             isQuota,
+            is503,
             isInvalid,
-            error: errorMsg
+            error: userFriendlyMsg
+        });
+    } catch (outerError: any) {
+        return res.json({
+            success: false,
+            valid: false,
+            error: outerError?.message || "Network test failed"
         });
     }
 });

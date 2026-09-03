@@ -4,7 +4,7 @@ import {
     Zap, FileText, FileSearch, CheckCircle, Newspaper, ArrowRight, Coins, 
     Bell, Sparkles, BookOpen, Clock, FolderOpen, ShoppingBag, Pin, ChevronLeft, ChevronRight, X,
     Share2, Copy, Check, Star, ExternalLink, MessageSquare,
-    Award, CheckCircle2, XCircle, Download, AlertCircle, RotateCcw
+    Award, CheckCircle2, XCircle, Download, AlertCircle, RotateCcw, Eye
 } from 'lucide-react';
 import { translations, Language } from '../translations';
 import { db } from '../services/firebase';
@@ -465,6 +465,17 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate, profil
             icon: FileText,
             color: 'from-purple-500 via-fuchsia-600 to-violet-850',
             iconBg: 'bg-violet-50 text-violet-600 shadow-sm shadow-violet-500/5',
+        },
+        {
+            id: 'anti-sleep' as AppStep,
+            title: lang === 'hi' ? 'Anti-Sleep Alarm / स्लीप अलार्म 👁️' : 'Anti-Sleep Alarm / Study Alert 👁️',
+            desc: lang === 'hi' 
+                ? 'रात में अध्ययन के दौरान झपकी व नींद से बचने के लिए AI आई-ट्रैकिंग व लाउड अलार्म।' 
+                : 'AI webcam eye tracking that alerts students with a loud buzzer when drowsiness is detected.',
+            badge: lang === 'hi' ? 'AI विज़न / Smart' : 'AI Vision',
+            icon: Eye,
+            color: 'from-cyan-600 via-blue-600 to-indigo-800',
+            iconBg: 'bg-cyan-50 text-cyan-600 shadow-sm shadow-cyan-500/5',
         },
         {
             id: 'pyq' as AppStep,
@@ -1687,21 +1698,20 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate, profil
                                             </div>
                                         </div>
 
-                                        {/* Template Switcher Pills in Modal */}
-                                        <div className="flex items-center bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-x-auto">
-                                            {TEMPLATE_OPTIONS.map(tmpl => (
-                                                <button
-                                                    key={tmpl.id}
-                                                    onClick={() => setFreeNoteTemplate(tmpl.id)}
-                                                    className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer ${
-                                                        freeNoteTemplate === tmpl.id ? 'bg-emerald-500 text-slate-950 font-extrabold shadow-xs' : 'text-slate-300 hover:text-white'
-                                                    }`}
-                                                >
-                                                    <span>{tmpl.icon}</span>
-                                                    <span className="hidden sm:inline">{tmpl.name.split(' ')[0]}</span>
-                                                </button>
-                                            ))}
-                                        </div>
+                                        {/* Locked Template Badge in Modal */}
+                                        {(() => {
+                                            const tmplId = activeNoteFile.noteData?.config?.template || 'infographic';
+                                            const tmplObj = TEMPLATE_OPTIONS.find(t => t.id === tmplId) || TEMPLATE_OPTIONS[0];
+                                            return (
+                                                <div className="flex items-center gap-1.5 bg-slate-800 text-slate-200 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-black shadow-2xs">
+                                                    <span className="text-sm">{tmplObj.icon}</span>
+                                                    <span className="text-slate-200 font-extrabold">{tmplObj.name}</span>
+                                                    <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded font-black uppercase tracking-wider">
+                                                        Locked 🔒
+                                                    </span>
+                                                </div>
+                                            );
+                                        })()}
 
                                         <div className="flex items-center gap-2">
                                             <button
@@ -1752,13 +1762,12 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({ onNavigate, profil
                                         <div className="w-full max-w-4xl mx-auto">
                                             <NoteTemplateRenderer 
                                                 note={{
-                                                    config: activeNoteFile.noteData?.config || { subject: noteSubject, topic: activeNoteFile.name, language: 'English', format: 'Detail' },
+                                                    config: activeNoteFile.noteData?.config || { subject: noteSubject, topic: activeNoteFile.name, language: 'English', format: 'Detail', template: activeNoteFile.noteData?.config?.template || 'infographic' },
                                                     content: noteContent,
                                                     handwrittenImageUrl: handwrittenImg,
                                                     createdAt: activeNoteFile.createdAt
                                                 }}
-                                                activeTemplate={freeNoteTemplate}
-                                                onSelectTemplate={(t) => setFreeNoteTemplate(t)}
+                                                activeTemplate={activeNoteFile.noteData?.config?.template || 'infographic'}
                                             />
                                         </div>
                                     </div>
